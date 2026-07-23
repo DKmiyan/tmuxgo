@@ -26,9 +26,9 @@ type Config struct {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Theme:  "auto",
-		Mouse:  true,
-		Keys:   DefaultKeys(),
+		Theme: "auto",
+		Mouse: true,
+		Keys:  DefaultKeys(),
 	}
 }
 
