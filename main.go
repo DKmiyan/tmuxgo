@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/DKmiyan/tmuxgo/internal/app"
+	"github.com/DKmiyan/tmuxgo/internal/setup"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
@@ -17,6 +18,7 @@ usage:
   tmuxgo list       print the session/window/pane tree
   tmuxgo last       go to the previously active session
   tmuxgo new [name] create a session and go to it
+  tmuxgo setup      install tmux.conf integration (popup, mouse, clipboard)
 
 environment:
   TMUXGO_SOCKET     use a non-default tmux socket name
@@ -60,6 +62,8 @@ func main() {
 			name = strings.Join(args[1:], " ")
 		}
 		cmdNew(b, name)
+	case "setup":
+		cmdSetup()
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -121,6 +125,23 @@ func cmdNew(b *tmux.Tmux, name string) {
 	if err := b.Attach(id); err != nil {
 		fatal(err)
 	}
+}
+
+func cmdSetup() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal(err)
+	}
+	conf, changed, err := setup.Run(home)
+	if err != nil {
+		fatal(err)
+	}
+	if changed {
+		fmt.Printf("tmuxgo: wrote %s (backup: %s.tmuxgo-bak)\n", conf, conf)
+	} else {
+		fmt.Printf("tmuxgo: %s already up to date\n", conf)
+	}
+	fmt.Println("tmuxgo: prefix + g opens the navigator popup")
 }
 
 func plural(n int, word string) string {
