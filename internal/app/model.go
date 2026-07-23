@@ -62,11 +62,15 @@ type model struct {
 	status      string
 	statusIsErr bool
 
+	// popup mode (tmux display-popup): quit right after a successful
+	// attach so the popup closes into the attach target.
+	popup bool
+
 	width  int
 	height int
 }
 
-func newModel(b tmux.Backend, dark bool) model {
+func newModel(b tmux.Backend, dark, popup bool) model {
 	in := textinput.New()
 	in.CharLimit = 120
 	return model{
@@ -75,15 +79,17 @@ func newModel(b tmux.Backend, dark bool) model {
 		expanded:     make(map[string]bool),
 		previewCache: make(map[string]string),
 		input:        in,
+		popup:        popup,
 		width:        80,
 		height:       24,
 	}
 }
 
-// Run starts the interactive TUI against the given backend.
-func Run(b tmux.Backend) error {
+// Run starts the interactive TUI against the given backend. popup enables
+// attach-and-exit mode for use from a tmux display-popup binding.
+func Run(b tmux.Backend, popup bool) error {
 	dark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-	p := tea.NewProgram(newModel(b, dark))
+	p := tea.NewProgram(newModel(b, dark, popup))
 	_, err := p.Run()
 	return err
 }

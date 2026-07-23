@@ -134,7 +134,7 @@ func apply(m model, msg tea.Msg) model {
 
 func newTestModel(width, height int) (model, *fakeBackend) {
 	fb := &fakeBackend{captureContent: "line one\nline two"}
-	m := newModel(fb, true)
+	m := newModel(fb, true, false)
 	m = apply(m, tea.WindowSizeMsg{Width: width, Height: height})
 	m = apply(m, treeMsg(testSessions()))
 	return m, fb
@@ -666,7 +666,7 @@ func TestViewSnapshotsDialogs(t *testing.T) {
 
 func TestEmptyState(t *testing.T) {
 	fb := &fakeBackend{}
-	m := newModel(fb, true)
+	m := newModel(fb, true, false)
 	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = apply(m, treeMsg(nil))
 	content := assertViewFits(t, m, 80, 24)
@@ -677,7 +677,7 @@ func TestEmptyState(t *testing.T) {
 
 func TestTreeErrorSurfaces(t *testing.T) {
 	fb := &fakeBackend{treeErr: errTest}
-	m := newModel(fb, true)
+	m := newModel(fb, true, false)
 	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = apply(m, m.fetchTree())
 	if m.status == "" || !m.statusIsErr {
@@ -690,6 +690,48 @@ var errTest = errString("boom")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// --- popup mode (display-popup: quit after successful attach) ---
+
+func TestPopupQuitsAfterAttach(t *testing.T) {
+	fb := &fakeBackend{}
+	m := newModel(fb, true, true)
+	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = apply(m, treeMsg(testSessions()))
+
+	_, cmd := m.Update(attachMsg{err: nil})
+	if cmd == nil {
+		t.Fatal("popup attach returned no command")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Fatal("popup mode must quit after a successful attach")
+	}
+}
+
+func TestNormalModeStaysAfterAttach(t *testing.T) {
+	fb := &fakeBackend{}
+	m := newModel(fb, true, false)
+	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = apply(m, treeMsg(testSessions()))
+
+	_, cmd := m.Update(attachMsg{err: nil})
+	if cmd == nil {
+		t.Fatal("attach returned no command")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+		t.Fatal("normal mode must keep running after attach")
+	}
+	// a failed attach in popup mode must also keep running and show the error
+	m.popup = true
+	m2, cmd2 := m.Update(attachMsg{err: errTest})
+	m = m2.(model)
+	if _, isQuit := cmd2().(tea.QuitMsg); isQuit {
+		t.Fatal("popup mode must not quit on a failed attach")
+	}
+	if m.status == "" || !m.statusIsErr {
+		t.Fatalf("status = %q (err=%v), want error surfaced", m.status, m.statusIsErr)
+	}
+}
 
 // --- end-to-end: real Program, scripted keystrokes, real renderer ---
 
@@ -706,7 +748,7 @@ func TestProgramSmoke(t *testing.T) {
 
 	// preload the tree before Run so scripted keys act on loaded rows
 	// (in the real program the fetch races the first keystrokes)
-	m := newModel(fb, true)
+	m := newModel(fb, true, false)
 	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = apply(m, treeMsg(fb.sessions))
 

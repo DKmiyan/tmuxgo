@@ -13,20 +13,35 @@ const usage = `tmuxgo - a tmux session navigator
 
 usage:
   tmuxgo            open the interactive navigator
+  tmuxgo --popup    navigator for tmux display-popup: exits after attach
   tmuxgo list       print the session/window/pane tree
   tmuxgo last       go to the previously active session
   tmuxgo new [name] create a session and go to it
 
 environment:
   TMUXGO_SOCKET     use a non-default tmux socket name
+
+popup binding (~/.tmux.conf):
+  bind g display-popup -E -w 90% -h 85% 'tmuxgo --popup'
 `
 
 func main() {
 	b := tmux.New()
 	args := os.Args[1:]
 
+	popup := false
+	rest := args[:0]
+	for _, a := range args {
+		if a == "--popup" || a == "-p" {
+			popup = true
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	args = rest
+
 	if len(args) == 0 {
-		if err := app.Run(b); err != nil {
+		if err := app.Run(b, popup); err != nil {
 			fatal(err)
 		}
 		return

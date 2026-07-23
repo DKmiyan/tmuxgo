@@ -32,6 +32,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attachMsg:
 		if msg.err != nil {
 			m.setStatus("attach failed: "+msg.err.Error(), true)
+			return m, m.fetchTree
+		}
+		if m.popup {
+			// popup mode: the switch already happened; exit so the
+			// display-popup closes into the attach target
+			return m, tea.Quit
 		}
 		return m, m.fetchTree
 	case previewMsg:
