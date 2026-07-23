@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/config"
 	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
@@ -753,6 +754,75 @@ func TestMouseIgnoredInFilterMode(t *testing.T) {
 	m = apply(m, click(5, 2))
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0 (mouse ignored in filter mode)", m.cursor)
+	}
+}
+
+// --- config / settings ---
+
+func TestSettingsToggleAndSave(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.cfgPath = filepath.Join(t.TempDir(), "config.json")
+
+	m, _ = press(m, ",")
+	if m.mode != modeSettings {
+		t.Fatalf("mode = %v, want settings", m.mode)
+	}
+	m, _ = press(m, "down") // preview default
+	m, _ = press(m, "down") // mouse
+	m, _ = press(m, "enter")
+	if m.mouseEnabled {
+		t.Fatal("mouse must be toggled off immediately")
+	}
+	m, cmd := press(m, "esc") // close -> save
+	if cmd == nil {
+		t.Fatal("closing settings returned no save command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("config save failed: %v", msg.err)
+	}
+	got, err := config.Load(m.cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Mouse {
+		t.Fatal("saved config has mouse on, want off")
+	}
+}
+
+func TestSettingsThemeAppliesLive(t *testing.T) {
+	m, _ := newTestModel(80, 24) // detected dark = true
+	m, _ = press(m, ",")
+	m, _ = press(m, "enter") // auto -> dark
+	if !m.sty.dark || m.cfg.Theme != "dark" {
+		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
+	}
+	m, _ = press(m, "enter") // dark -> light
+	if m.sty.dark || m.cfg.Theme != "light" {
+		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
+	}
+	m, _ = press(m, "enter") // light -> auto (back to detected dark)
+	if !m.sty.dark || m.cfg.Theme != "auto" {
+		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
+	}
+}
+
+func TestKeymapOverride(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	cfg := config.Default()
+	cfg.Keys["new"] = []string{"N"}
+	m.applyConfig(cfg, "")
+
+	m, _ = press(m, "n") // no longer bound
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal (n unbound)", m.mode)
+	}
+	// footer reflects the override
+	if got := m.View().Content; !strings.Contains(got, "N new") {
+		t.Fatalf("footer missing overridden key:\n%s", got)
+	}
+	m, _ = press(m, "N")
+	if m.mode != modeCreate {
+		t.Fatalf("mode = %v, want create (N bound)", m.mode)
 	}
 }
 

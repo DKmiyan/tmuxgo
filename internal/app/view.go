@@ -45,6 +45,8 @@ func (m model) render() string {
 		body = m.renderConfirm(w, bodyH)
 	case modeMove:
 		body = m.renderMove(w, bodyH)
+	case modeSettings:
+		body = m.renderSettings(w, bodyH)
 	default:
 		body = m.renderBody(w, bodyH)
 	}
@@ -83,13 +85,34 @@ func (m model) renderFooter(w int) string {
 		s = "y confirm · n cancel"
 	case modeHelp:
 		s = "any key to close"
+	case modeSettings:
+		s = "↑/↓ move · enter change · esc save & close"
 	default:
-		s = "n new · r rename · m move · d kill · / filter · p preview · ? help · q quit"
+		s = m.defaultFooterHints()
 		if m.filter != "" {
 			s = fmt.Sprintf("filter: %q (esc clears) · %s", m.filter, s)
 		}
 	}
 	return trunc(m.sty.meta().Render(s), w)
+}
+
+// defaultFooterHints builds the normal-mode hint line from the configured
+// key bindings (first binding of each action).
+func (m model) defaultFooterHints() string {
+	actions := []struct{ name, label string }{
+		{"new", "new"}, {"rename", "rename"}, {"move", "move"}, {"kill", "kill"},
+		{"filter", "filter"}, {"preview", "preview"}, {"help", "help"},
+		{"settings", "settings"}, {"quit", "quit"},
+	}
+	parts := make([]string, 0, len(actions))
+	for _, a := range actions {
+		k := "?"
+		if keys := m.cfg.Keys[a.name]; len(keys) > 0 {
+			k = keys[0]
+		}
+		parts = append(parts, k+" "+a.label)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (m model) renderPromptOrStatus(w int) string {
@@ -234,27 +257,15 @@ func shortPath(p string) string {
 // --- dialogs (replace the body area) ---
 
 func (m model) renderHelp(w, bodyH int) string {
-	raw := []string{
-		"keys",
-		"",
-		"  ↑/k ↓/j   move",
-		"  →/l       expand / enter first child",
-		"  ←/h       collapse / go to parent",
-		"  enter     attach to selected session/window/pane",
-		"",
-		"  n         new session / window / split pane",
-		"  r         rename session/window",
-		"  m         move window/pane",
-		"  d         kill session/window/pane (confirms first)",
-		"",
-		"  /         filter",
-		"  p         toggle pane preview (wide terminals)",
-		"  ?         this help",
-		"  q         quit",
-		"",
-		"  mouse     click select, marker click expands,",
-		"            double-click attaches, wheel scrolls",
+	raw := []string{"keys", ""}
+	for _, e := range helpEntries {
+		raw = append(raw, fmt.Sprintf("  %-10s %s", strings.Join(m.cfg.Keys[e.name], "/"), e.desc))
 	}
+	raw = append(raw, "",
+		"  mouse      click select, marker click expands,",
+		"             double-click attaches, wheel scrolls",
+		"  esc        clear filter",
+	)
 	lines := make([]string, 0, len(raw))
 	for i, l := range raw {
 		if i == 0 {
@@ -265,6 +276,49 @@ func (m model) renderHelp(w, bodyH int) string {
 	}
 	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
+}
+
+// helpEntries lists bindable actions in help order.
+var helpEntries = []struct{ name, desc string }{
+	{"up", "move up"},
+	{"down", "move down"},
+	{"expand", "expand / enter first child"},
+	{"collapse", "collapse / go to parent"},
+	{"attach", "attach to selected session/window/pane"},
+	{"new", "new session / window / split pane / from template"},
+	{"rename", "rename session/window"},
+	{"move", "move window/pane"},
+	{"kill", "kill session/window/pane (confirms first)"},
+	{"filter", "filter"},
+	{"preview", "toggle pane preview (wide terminals)"},
+	{"settings", "settings"},
+	{"help", "this help"},
+	{"quit", "quit"},
+}
+
+func (m model) renderSettings(w, bodyH int) string {
+	values := []struct{ label, value string }{
+		{"theme", m.cfg.Theme},
+		{"preview on start", onOff(m.cfg.PreviewDefault)},
+		{"mouse", onOff(m.cfg.Mouse)},
+	}
+	lines := []string{m.sty.title().Render("settings"), ""}
+	for i, v := range values {
+		line := fmt.Sprintf("%-18s %s", v.label, v.value)
+		lines = append(lines, m.pickLine(line, i == m.settingsCursor))
+	}
+	lines = append(lines, "",
+		m.sty.meta().Render("keys are configurable in:"),
+		m.sty.meta().Render(trunc(m.cfgPath, w-12)))
+	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }
 
 func (m model) renderCreate(w, bodyH int) string {

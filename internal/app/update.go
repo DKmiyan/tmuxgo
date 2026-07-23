@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/DKmiyan/tmuxgo/internal/config"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -146,6 +148,8 @@ func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(k)
 	case modeMove:
 		return m.handleMoveKey(k)
+	case modeSettings:
+		return m.handleSettingsKey(k)
 	case modeHelp:
 		m.mode = modeNormal
 		return m, nil
@@ -155,41 +159,47 @@ func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "esc":
+	// esc is fixed: it clears an active filter (and is never bindable)
+	if k.String() == "esc" {
 		if m.filter != "" {
 			m.filter = ""
 			m.rebuild()
 		}
 		return m, nil
-	case "up", "k":
+	}
+	act, ok := m.keyActions[k.String()]
+	if !ok {
+		return m, nil
+	}
+	switch act {
+	case actQuit:
+		return m, tea.Quit
+	case actUp:
 		m.moveCursor(-1)
 		return m, m.previewCmd()
-	case "down", "j":
+	case actDown:
 		m.moveCursor(1)
 		return m, m.previewCmd()
-	case "right", "l":
+	case actExpand:
 		m.expandOrChild()
 		return m, m.previewCmd()
-	case "left", "h":
+	case actCollapse:
 		m.collapseOrParent()
 		return m, m.previewCmd()
-	case "enter":
+	case actAttach:
 		if r, ok := m.currentRow(); ok {
 			return m, m.attach(r.id)
 		}
 		return m, nil
-	case "n":
+	case actNew:
 		return m.startCreate()
-	case "r":
+	case actRename:
 		return m.startRename()
-	case "m":
+	case actMove:
 		return m.startMove()
-	case "d":
+	case actKill:
 		return m.startDelete()
-	case "/":
+	case actFilter:
 		m.mode = modeFilter
 		m.input.Reset()
 		m.input.Prompt = "/"
@@ -197,14 +207,64 @@ func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.filter = ""
 		m.rebuild()
 		return m, m.input.Focus()
-	case "p":
+	case actPreview:
 		m.previewOn = !m.previewOn
 		if m.previewOn && m.width < previewMinWidth {
 			m.setStatus("preview hidden: terminal too narrow", true)
 		}
 		return m, m.previewCmd()
-	case "?":
+	case actHelp:
 		m.mode = modeHelp
+		return m, nil
+	case actSettings:
+		m.mode = modeSettings
+		m.settingsCursor = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleSettingsKey drives the settings screen: three toggles persisted on
+// close. Theme changes apply immediately.
+func (m model) handleSettingsKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch k.String() {
+	case "esc", "q":
+		m.mode = modeNormal
+		cfg, path := m.cfg, m.cfgPath
+		return m, func() tea.Msg {
+			if path == "" {
+				return nil
+			}
+			return mutationMsg{err: config.Save(path, cfg), ok: "settings saved"}
+		}
+	case "up", "k":
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.settingsCursor < 2 {
+			m.settingsCursor++
+		}
+		return m, nil
+	case "enter", "space":
+		switch m.settingsCursor {
+		case 0:
+			switch m.cfg.Theme {
+			case "auto":
+				m.cfg.Theme = "dark"
+			case "dark":
+				m.cfg.Theme = "light"
+			default:
+				m.cfg.Theme = "auto"
+			}
+			m.applyTheme()
+		case 1:
+			m.cfg.PreviewDefault = !m.cfg.PreviewDefault
+		case 2:
+			m.cfg.Mouse = !m.cfg.Mouse
+			m.mouseEnabled = m.cfg.Mouse
+		}
 		return m, nil
 	}
 	return m, nil

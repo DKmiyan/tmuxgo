@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/config"
 	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
@@ -22,6 +23,7 @@ const (
 	modeConfirm
 	modeMove
 	modeHelp
+	modeSettings
 )
 
 // inputPurpose identifies what a text input is collecting.
@@ -71,6 +73,15 @@ type model struct {
 	// (nil = feature unavailable)
 	templates *template.Store
 
+	// user configuration (theme, defaults, key bindings)
+	cfg          config.Config
+	cfgPath      string
+	detectedDark bool
+	keyActions   map[string]action
+
+	// settings screen cursor (0 = theme, 1 = preview default, 2 = mouse)
+	settingsCursor int
+
 	// mouse support: click selects, double-click attaches, wheel scrolls
 	mouseEnabled bool
 	lastClickRow int
@@ -83,6 +94,7 @@ type model struct {
 func newModel(b tmux.Backend, dark, popup bool) model {
 	in := textinput.New()
 	in.CharLimit = 120
+	cfg := config.Default()
 	return model{
 		backend:      b,
 		sty:          newStyles(dark),
@@ -90,11 +102,79 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 		previewCache: make(map[string]string),
 		input:        in,
 		popup:        popup,
-		mouseEnabled: true,
+		cfg:          cfg,
+		detectedDark: dark,
+		keyActions:   buildKeyActions(cfg),
+		mouseEnabled: cfg.Mouse,
 		lastClickRow: -1,
 		width:        80,
 		height:       24,
 	}
+}
+
+// applyConfig overlays the loaded configuration onto the model.
+func (m *model) applyConfig(cfg config.Config, path string) {
+	m.cfg = cfg
+	m.cfgPath = path
+	m.keyActions = buildKeyActions(cfg)
+	m.applyTheme()
+	m.mouseEnabled = cfg.Mouse
+	m.previewOn = cfg.PreviewDefault
+}
+
+// applyTheme rebuilds the palette from the configured theme. "auto" keeps
+// the palette detected from the terminal background.
+func (m *model) applyTheme() {
+	switch m.cfg.Theme {
+	case "dark":
+		m.sty = newStyles(true)
+	case "light":
+		m.sty = newStyles(false)
+	default:
+		m.sty = newStyles(m.detectedDark)
+	}
+}
+
+// action identifies a bindable normal-mode action.
+type action int
+
+const (
+	actUp action = iota
+	actDown
+	actExpand
+	actCollapse
+	actAttach
+	actNew
+	actRename
+	actMove
+	actKill
+	actFilter
+	actPreview
+	actHelp
+	actSettings
+	actQuit
+)
+
+var actionByName = map[string]action{
+	"up": actUp, "down": actDown, "expand": actExpand, "collapse": actCollapse,
+	"attach": actAttach, "new": actNew, "rename": actRename, "move": actMove,
+	"kill": actKill, "filter": actFilter, "preview": actPreview, "help": actHelp,
+	"settings": actSettings, "quit": actQuit,
+}
+
+// buildKeyActions flattens the action -> keys config into key -> action.
+func buildKeyActions(cfg config.Config) map[string]action {
+	out := make(map[string]action, len(cfg.Keys))
+	for name, keys := range cfg.Keys {
+		act, ok := actionByName[name]
+		if !ok {
+			continue
+		}
+		for _, k := range keys {
+			out[k] = act
+		}
+	}
+	return out
 }
 
 // Run starts the interactive TUI against the given backend. popup enables
@@ -104,6 +184,11 @@ func Run(b tmux.Backend, popup bool) error {
 	m := newModel(b, dark, popup)
 	if store, err := template.DefaultStore(); err == nil {
 		m.templates = store
+	}
+	if path, err := config.DefaultPath(); err == nil {
+		if cfg, err := config.Load(path); err == nil {
+			m.applyConfig(cfg, path)
+		}
 	}
 	p := tea.NewProgram(m)
 	_, err := p.Run()
