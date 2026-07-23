@@ -40,4 +40,8 @@ type Backend interface {
 	// switch-client inside tmux, attach-session outside. Stdio is left
 	// for the caller (bubbletea's ExecProcess wires the terminal).
 	AttachCmd(target string) *exec.Cmd
+
+	// CurrentSessionID returns the ID of the session the current client
+	// is in ("" when the process is not inside tmux).
+	CurrentSessionID() (string, error)
 }

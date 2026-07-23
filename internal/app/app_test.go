@@ -26,6 +26,7 @@ type fakeBackend struct {
 
 	captureContent string
 	captureErr     error
+	currentSession string
 
 	newSessions  []string
 	newWindows   [][2]string
@@ -110,6 +111,10 @@ func (f *fakeBackend) CapturePane(paneID string, lines int) (string, error) {
 
 func (f *fakeBackend) AttachCmd(target string) *exec.Cmd {
 	return exec.Command("true")
+}
+
+func (f *fakeBackend) CurrentSessionID() (string, error) {
+	return f.currentSession, nil
 }
 
 // --- helpers ---
@@ -913,6 +918,65 @@ func TestNormalModeStaysAfterAttach(t *testing.T) {
 	}
 	if m.status == "" || !m.statusIsErr {
 		t.Fatalf("status = %q (err=%v), want error surfaced", m.status, m.statusIsErr)
+	}
+}
+
+func TestPopupDefaultsEnablePreview(t *testing.T) {
+	fb := &fakeBackend{}
+	m := newModel(fb, true, true)
+	m.applyPopupDefaults()
+	if !m.previewOn {
+		t.Fatal("popup mode must default the preview on")
+	}
+}
+
+func TestPopupFocusesCurrentSession(t *testing.T) {
+	fb := &fakeBackend{currentSession: "$2"}
+	m := newModel(fb, true, true)
+	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = apply(m, treeMsg(testSessions()))
+	m = apply(m, m.focusCurrent()) // delivers focusMsg{"$2"}
+	// focus arrived after the tree: applied immediately
+	if got := m.rows[m.cursor].id; got != "$2" {
+		t.Fatalf("focused row = %s, want $2", got)
+	}
+	assertIDs(t, m, []string{"$1", "$2", "@3"})
+
+	// and when the focus arrives before the tree it stays pending
+	m2 := newModel(fb, true, true)
+	m2 = apply(m2, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m2 = apply(m2, m2.focusCurrent())
+	m2 = apply(m2, treeMsg(testSessions()))
+	if got := m2.rows[m2.cursor].id; got != "$2" {
+		t.Fatalf("pending-focused row = %s, want $2", got)
+	}
+}
+
+func TestPopupEscQuits(t *testing.T) {
+	fb := &fakeBackend{}
+	m := newModel(fb, true, true)
+	m = apply(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = apply(m, treeMsg(testSessions()))
+
+	_, cmd := press(m, "esc")
+	if cmd == nil {
+		t.Fatal("esc in popup mode returned no command")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Fatal("esc in popup mode must quit")
+	}
+
+	// with an active filter, esc clears the filter instead of quitting
+	m.filter = "vim"
+	m.rebuild()
+	m, cmd = press(m, "esc")
+	if m.filter != "" {
+		t.Fatal("esc must clear the filter first")
+	}
+	if cmd != nil {
+		if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+			t.Fatal("esc with active filter must not quit")
+		}
 	}
 }
 

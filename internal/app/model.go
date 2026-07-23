@@ -68,6 +68,9 @@ type model struct {
 	// popup mode (tmux display-popup): quit right after a successful
 	// attach so the popup closes into the attach target.
 	popup bool
+	// pendingFocus selects+expands this session ID on the next tree load
+	// (popup mode focuses the client's current session)
+	pendingFocus string
 
 	// templates enables "new session from template" in the create menu
 	// (nil = feature unavailable)
@@ -190,13 +193,27 @@ func Run(b tmux.Backend, popup bool) error {
 			m.applyConfig(cfg, path)
 		}
 	}
+	m.applyPopupDefaults()
 	p := tea.NewProgram(m)
 	_, err := p.Run()
 	return err
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.fetchTree, tick())
+	cmds := []tea.Cmd{m.fetchTree, tick()}
+	if m.popup {
+		cmds = append(cmds, m.focusCurrent)
+	}
+	return tea.Batch(cmds...)
+}
+
+// applyPopupDefaults enables popup-mode conveniences: preview on and
+// focusing the client's current session on load.
+func (m *model) applyPopupDefaults() {
+	if !m.popup {
+		return
+	}
+	m.previewOn = true
 }
 
 // --- messages ---
@@ -212,6 +229,18 @@ type mutationMsg struct {
 }
 
 type attachMsg struct{ err error }
+
+// focusMsg carries the client's current session ID for popup focus.
+type focusMsg struct{ id string }
+
+// focusCurrent resolves the client's current session (popup mode).
+func (m model) focusCurrent() tea.Msg {
+	id, err := m.backend.CurrentSessionID()
+	if err != nil {
+		return errMsg{err}
+	}
+	return focusMsg{id: id}
+}
 
 type previewMsg struct {
 	id      string
@@ -308,6 +337,21 @@ func (m *model) ensureVisible() {
 	}
 	if m.offset < 0 {
 		m.offset = 0
+	}
+}
+
+// focusSession selects and expands the session with the given tmux ID.
+func (m *model) focusSession(id string) {
+	idx := indexOfRow(m.rows, id)
+	if idx < 0 {
+		return
+	}
+	collapseSiblings(m.rows, m.rows[idx], m.expanded)
+	m.expanded[id] = true
+	m.rebuild()
+	if idx := indexOfRow(m.rows, id); idx >= 0 {
+		m.cursor = idx
+		m.ensureVisible()
 	}
 }
 

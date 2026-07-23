@@ -40,8 +40,12 @@ func (t *Tmux) SwitchToLast() error {
 	return t.run("switch-client", "-l")
 }
 
-// CurrentSessionID returns the ID of the session the current client is in.
+// CurrentSessionID returns the ID of the session the current client is in,
+// or "" when the process is not running inside tmux.
 func (t *Tmux) CurrentSessionID() (string, error) {
+	if !InsideTmux() {
+		return "", nil
+	}
 	out, err := t.output("display-message", "-p", "#{session_id}")
 	if err != nil {
 		return "", err

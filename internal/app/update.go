@@ -21,6 +21,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tree = msg
 		m.loaded = true
 		m.rebuild()
+		if m.pendingFocus != "" {
+			m.focusSession(m.pendingFocus)
+			m.pendingFocus = ""
+		}
+		return m, nil
+	case focusMsg:
+		if msg.id != "" {
+			m.pendingFocus = msg.id
+			if m.loaded {
+				m.pendingFocus = ""
+				m.focusSession(msg.id)
+			}
+		}
 		return m, nil
 	case errMsg:
 		m.setStatus(msg.err.Error(), true)
@@ -159,11 +172,14 @@ func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// esc is fixed: it clears an active filter (and is never bindable)
+	// esc is fixed: it clears an active filter (and is never bindable);
+	// in popup mode with no filter it closes the popup
 	if k.String() == "esc" {
 		if m.filter != "" {
 			m.filter = ""
 			m.rebuild()
+		} else if m.popup {
+			return m, tea.Quit
 		}
 		return m, nil
 	}
