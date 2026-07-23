@@ -691,6 +691,60 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+// --- mouse ---
+
+func click(x, y int) tea.MouseClickMsg {
+	return tea.MouseClickMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+func TestMouseClickSelectsRow(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m = apply(m, click(5, 2)) // second row ($2); header is line 0
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+}
+
+func TestMouseMarkerTogglesExpand(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m = apply(m, click(0, 1)) // marker of $1
+	assertIDs(t, m, []string{"$1", "@1", "@2", "$2"})
+	m = apply(m, click(0, 1)) // collapse again
+	assertIDs(t, m, []string{"$1", "$2"})
+}
+
+func TestMouseDoubleClickAttaches(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m = apply(m, click(5, 1))
+	_, cmd := m.Update(click(5, 1))
+	if cmd == nil {
+		t.Fatal("double-click returned no attach command")
+	}
+	// do not invoke: it would run ExecProcess against the tty
+}
+
+func TestMouseWheelScrolls(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	wheel := tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelDown})
+	m = apply(m, wheel) // clamps to last row
+	if m.cursor != len(m.rows)-1 {
+		t.Fatalf("cursor = %d, want %d", m.cursor, len(m.rows)-1)
+	}
+	m = apply(m, tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelUp}))
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestMouseIgnoredInFilterMode(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "/")
+	m = apply(m, click(5, 2))
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (mouse ignored in filter mode)", m.cursor)
+	}
+}
+
 // --- popup mode (display-popup: quit after successful attach) ---
 
 func TestPopupQuitsAfterAttach(t *testing.T) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -45,10 +46,92 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(m.fetchTree, tick(), m.previewCmd())
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(tea.Mouse(msg))
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(tea.Mouse(msg))
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+// handleMouseWheel scrolls the cursor in normal mode and in the
+// create/move pickers.
+func (m model) handleMouseWheel(ev tea.Mouse) (tea.Model, tea.Cmd) {
+	delta := 3
+	if ev.Button == tea.MouseWheelUp {
+		delta = -3
+	}
+	switch m.mode {
+	case modeNormal:
+		m.moveCursor(delta)
+		return m, m.previewCmd()
+	case modeCreate:
+		if c := m.create; c != nil {
+			c.cursor += delta / 3
+			if c.cursor < 0 {
+				c.cursor = 0
+			}
+			if c.cursor > len(c.items)-1 {
+				c.cursor = len(c.items) - 1
+			}
+		}
+		return m, nil
+	case modeMove:
+		if st := m.move; st != nil {
+			st.cursor += delta / 3
+			if st.cursor < 0 {
+				st.cursor = 0
+			}
+			if st.cursor > len(st.targets)-1 {
+				st.cursor = len(st.targets) - 1
+			}
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleMouseClick implements mouse selection in normal mode:
+// click selects a row, click on an expand marker toggles it, and a quick
+// second click on the same row attaches to it.
+func (m model) handleMouseClick(ev tea.Mouse) (tea.Model, tea.Cmd) {
+	if m.mode != modeNormal || ev.Button != tea.MouseLeft {
+		return m, nil
+	}
+	// the body starts one line below the header
+	idx := m.offset + ev.Y - 1
+	if idx < 0 || idx >= len(m.rows) {
+		return m, nil
+	}
+	if m.showPreview() && ev.X >= m.width*3/5 {
+		return m, nil // click landed in the preview column
+	}
+	r := m.rows[idx]
+
+	// expand/collapse marker zone (session/window rows only)
+	if r.kind != rowPane && m.filter == "" && ev.X >= 2*r.depth && ev.X < 2*r.depth+2 {
+		if m.expanded[r.id] {
+			delete(m.expanded, r.id)
+		} else {
+			collapseSiblings(m.rows, r, m.expanded)
+			m.expanded[r.id] = true
+		}
+		m.cursor = idx
+		m.rebuild()
+		return m, m.previewCmd()
+	}
+
+	doubleClick := idx == m.lastClickRow && time.Since(m.lastClickAt) < 500*time.Millisecond
+	m.cursor = idx
+	m.ensureVisible()
+	m.lastClickRow = idx
+	m.lastClickAt = time.Now()
+	if doubleClick {
+		return m, m.attach(r.id)
+	}
+	return m, m.previewCmd()
 }
 
 func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

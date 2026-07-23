@@ -16,6 +16,9 @@ func (m model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.WindowTitle = "tmuxgo"
+	if m.mouseEnabled {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 
@@ -248,6 +251,9 @@ func (m model) renderHelp(w, bodyH int) string {
 		"  p         toggle pane preview (wide terminals)",
 		"  ?         this help",
 		"  q         quit",
+		"",
+		"  mouse     click select, marker click expands,",
+		"            double-click attaches, wheel scrolls",
 	}
 	lines := make([]string, 0, len(raw))
 	for i, l := range raw {

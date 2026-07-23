@@ -66,6 +66,11 @@ type model struct {
 	// attach so the popup closes into the attach target.
 	popup bool
 
+	// mouse support: click selects, double-click attaches, wheel scrolls
+	mouseEnabled bool
+	lastClickRow int
+	lastClickAt  time.Time
+
 	width  int
 	height int
 }
@@ -80,6 +85,8 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 		previewCache: make(map[string]string),
 		input:        in,
 		popup:        popup,
+		mouseEnabled: true,
+		lastClickRow: -1,
 		width:        80,
 		height:       24,
 	}
