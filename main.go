@@ -22,7 +22,9 @@ environment:
   TMUXGO_SOCKET     use a non-default tmux socket name
 
 popup binding (~/.tmux.conf):
-  bind g display-popup -E -w 90% -h 85% 'tmuxgo --popup'
+  bind g display-popup -E -w 90% -h 85% '/path/to/tmuxgo --popup'
+
+  use an absolute path: the tmux server's PATH may not include ~/.local/bin
 `
 
 func main() {
