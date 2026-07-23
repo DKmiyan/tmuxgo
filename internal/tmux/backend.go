@@ -11,9 +11,12 @@ type Backend interface {
 	// yields an empty tree and no error.
 	Tree() ([]Session, error)
 
-	NewSession(name string) error           // empty name lets tmux pick one
-	NewWindow(sessionID, name string) error // empty name lets tmux pick one
-	SplitPane(paneID string) error
+	NewSession(name string) error                // empty name lets tmux pick one
+	NewWindow(sessionID, name, dir string) error // empty name/dir let tmux pick
+	SplitPane(paneID, dir string) error
+
+	// NewSessionID creates a detached session and returns its tmux ID.
+	NewSessionID(name, dir string) (string, error)
 
 	RenameSession(id, name string) error
 	RenameWindow(id, name string) error
@@ -24,6 +27,10 @@ type Backend interface {
 	KillSession(id string) error
 	KillWindow(id string) error
 	KillPane(id string) error
+
+	// SelectLayout applies a tmux layout string to a window, restoring
+	// its split structure and proportions.
+	SelectLayout(windowID, layout string) error
 
 	// CapturePane returns the visible pane content, trimmed and capped
 	// at the last lines lines (<= 0 means the whole visible pane).

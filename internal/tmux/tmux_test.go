@@ -105,14 +105,14 @@ func TestNewWindowAndSplitPane(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	s := findSession(t, mustTree(t, b), "alpha")
-	if err := b.NewWindow(s.ID, ""); err != nil {
+	if err := b.NewWindow(s.ID, "", ""); err != nil {
 		t.Fatalf("NewWindow: %v", err)
 	}
 	s = findSession(t, mustTree(t, b), "alpha")
 	if len(s.Windows) != 2 {
 		t.Fatalf("windows = %d, want 2", len(s.Windows))
 	}
-	if err := b.SplitPane(s.Windows[0].Panes[0].ID); err != nil {
+	if err := b.SplitPane(s.Windows[0].Panes[0].ID, ""); err != nil {
 		t.Fatalf("SplitPane: %v", err)
 	}
 	s = findSession(t, mustTree(t, b), "alpha")
@@ -133,7 +133,7 @@ func TestMoveWindow(t *testing.T) {
 	alpha := findSession(t, tree, "alpha")
 	// give alpha a second window so moving one does not kill the session
 	// (moving a session's last window kills the session).
-	if err := b.NewWindow(alpha.ID, ""); err != nil {
+	if err := b.NewWindow(alpha.ID, "", ""); err != nil {
 		t.Fatalf("NewWindow: %v", err)
 	}
 	tree = mustTree(t, b)
@@ -169,11 +169,11 @@ func TestMovePane(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	s := findSession(t, mustTree(t, b), "alpha")
-	if err := b.NewWindow(s.ID, ""); err != nil {
+	if err := b.NewWindow(s.ID, "", ""); err != nil {
 		t.Fatalf("NewWindow: %v", err)
 	}
 	s = findSession(t, mustTree(t, b), "alpha")
-	if err := b.SplitPane(s.Windows[0].Panes[0].ID); err != nil {
+	if err := b.SplitPane(s.Windows[0].Panes[0].ID, ""); err != nil {
 		t.Fatalf("SplitPane: %v", err)
 	}
 	s = findSession(t, mustTree(t, b), "alpha")

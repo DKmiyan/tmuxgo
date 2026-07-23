@@ -14,6 +14,7 @@ const (
 	createSession createKind = iota
 	createWindow
 	createSplit
+	createFromTemplate
 )
 
 type createItem struct {
@@ -50,7 +51,13 @@ func (m model) startCreate() (tea.Model, tea.Cmd) {
 		}
 	}
 	// default to the most contextual (last) option
-	m.create = &createState{items: items, cursor: len(items) - 1}
+	def := len(items) - 1
+	if m.templates != nil {
+		if ts, err := m.templates.List(); err == nil && len(ts) > 0 {
+			items = append(items, createItem{label: "New session from template…", kind: createFromTemplate})
+		}
+	}
+	m.create = &createState{items: items, cursor: def}
 	m.mode = modeCreate
 	return m, nil
 }
@@ -87,12 +94,13 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 // --- move ---
 
 type moveState struct {
-	title    string
-	labels   []string
-	targets  []string
-	cursor   int
-	sourceID string
-	isWindow bool // moving a window between sessions; false = pane between windows
+	title      string
+	labels     []string
+	targets    []string
+	cursor     int
+	sourceID   string
+	isWindow   bool // moving a window between sessions; false = pane between windows
+	isTemplate bool // picking a session template to instantiate
 }
 
 func (m model) startMove() (tea.Model, tea.Cmd) {
@@ -147,6 +155,25 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 		m.move = st
 		m.mode = modeMove
 	}
+	return m, nil
+}
+
+// --- template picker ---
+
+// startTemplatePicker lists stored templates to instantiate as new sessions.
+func (m model) startTemplatePicker() (tea.Model, tea.Cmd) {
+	ts, err := m.templates.List()
+	if err != nil || len(ts) == 0 {
+		m.setStatus("no templates saved", true)
+		return m, nil
+	}
+	st := &moveState{title: "New session from template:", isTemplate: true}
+	for _, t := range ts {
+		st.labels = append(st.labels, fmt.Sprintf("%s (%s)", t.Name, plural(len(t.Windows), "window")))
+		st.targets = append(st.targets, t.Name)
+	}
+	m.move = st
+	m.mode = modeMove
 	return m, nil
 }
 

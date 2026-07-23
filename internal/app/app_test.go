@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
@@ -41,12 +43,17 @@ func (f *fakeBackend) NewSession(name string) error {
 	return nil
 }
 
-func (f *fakeBackend) NewWindow(sessionID, name string) error {
+func (f *fakeBackend) NewSessionID(name, dir string) (string, error) {
+	f.newSessions = append(f.newSessions, name)
+	return "$fake", nil
+}
+
+func (f *fakeBackend) NewWindow(sessionID, name, dir string) error {
 	f.newWindows = append(f.newWindows, [2]string{sessionID, name})
 	return nil
 }
 
-func (f *fakeBackend) SplitPane(paneID string) error {
+func (f *fakeBackend) SplitPane(paneID, dir string) error {
 	f.splits = append(f.splits, paneID)
 	return nil
 }
@@ -89,6 +96,10 @@ func (f *fakeBackend) KillWindow(id string) error {
 
 func (f *fakeBackend) KillPane(id string) error {
 	f.killed = append(f.killed, id)
+	return nil
+}
+
+func (f *fakeBackend) SelectLayout(windowID, layout string) error {
 	return nil
 }
 
@@ -742,6 +753,54 @@ func TestMouseIgnoredInFilterMode(t *testing.T) {
 	m = apply(m, click(5, 2))
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0 (mouse ignored in filter mode)", m.cursor)
+	}
+}
+
+// --- templates in the TUI ---
+
+func TestCreateChooserIncludesTemplates(t *testing.T) {
+	dir := t.TempDir()
+	store := template.NewStore(filepath.Join(dir, "templates.json"))
+	if err := store.Save(template.Template{
+		Name:    "dev",
+		Windows: []template.Window{{Name: "editor", Panes: []template.Pane{{Dir: "/x"}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := newTestModel(80, 24)
+	m.templates = store
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1
+	m, _ = press(m, "n")
+
+	items := m.create.items
+	last := items[len(items)-1]
+	if last.kind != createFromTemplate {
+		t.Fatalf("last item kind = %v, want createFromTemplate", last.kind)
+	}
+	// default stays on the contextual item, not the template entry
+	if m.create.cursor != len(items)-2 {
+		t.Fatalf("default cursor = %d, want %d", m.create.cursor, len(items)-2)
+	}
+
+	// pick the template entry -> picker appears
+	for m.create.cursor != len(items)-1 {
+		m, _ = press(m, "down")
+	}
+	m, _ = press(m, "enter")
+	if m.mode != modeMove || m.move == nil || !m.move.isTemplate {
+		t.Fatalf("mode = %v, want template picker", m.mode)
+	}
+	if m.move.labels[0] != "dev (1 window)" {
+		t.Fatalf("picker label = %q", m.move.labels[0])
+	}
+
+	// confirm: a mutation command is issued (its result depends on the
+	// backend honoring NewSessionID; the fake cannot fully support it)
+	m, cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("template create returned no command")
 	}
 }
 

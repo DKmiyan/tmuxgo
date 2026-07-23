@@ -40,11 +40,24 @@ func (t *Tmux) SwitchToLast() error {
 	return t.run("switch-client", "-l")
 }
 
+// CurrentSessionID returns the ID of the session the current client is in.
+func (t *Tmux) CurrentSessionID() (string, error) {
+	out, err := t.output("display-message", "-p", "#{session_id}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // NewSessionID creates a detached session and returns its tmux ID.
-func (t *Tmux) NewSessionID(name string) (string, error) {
+// name and dir may be empty.
+func (t *Tmux) NewSessionID(name, dir string) (string, error) {
 	args := []string{"new-session", "-d", "-P", "-F", "#{session_id}"}
 	if name != "" {
 		args = append(args, "-s", name)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
 	}
 	out, err := t.output(args...)
 	if err != nil {

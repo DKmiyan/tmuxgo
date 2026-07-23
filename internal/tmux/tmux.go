@@ -129,18 +129,30 @@ func (t *Tmux) NewSession(name string) error {
 	return t.run(args...)
 }
 
-// NewWindow creates a window in the given session; name may be empty.
-func (t *Tmux) NewWindow(sessionID, name string) error {
+// NewWindow creates a window in the given session; name and dir may be empty.
+func (t *Tmux) NewWindow(sessionID, name, dir string) error {
 	args := []string{"new-window", "-t", sessionID}
 	if name != "" {
 		args = append(args, "-n", name)
 	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
 	return t.run(args...)
 }
 
-// SplitPane splits the window containing the given pane.
-func (t *Tmux) SplitPane(paneID string) error {
-	return t.run("split-window", "-t", paneID)
+// SplitPane splits the window containing the given pane; dir may be empty.
+func (t *Tmux) SplitPane(paneID, dir string) error {
+	args := []string{"split-window", "-t", paneID}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	return t.run(args...)
+}
+
+// SelectLayout applies a tmux layout string to a window.
+func (t *Tmux) SelectLayout(windowID, layout string) error {
+	return t.run("select-layout", "-t", windowID, layout)
 }
 
 // RenameSession renames a session.

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
@@ -66,6 +67,10 @@ type model struct {
 	// attach so the popup closes into the attach target.
 	popup bool
 
+	// templates enables "new session from template" in the create menu
+	// (nil = feature unavailable)
+	templates *template.Store
+
 	// mouse support: click selects, double-click attaches, wheel scrolls
 	mouseEnabled bool
 	lastClickRow int
@@ -96,7 +101,11 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 // attach-and-exit mode for use from a tmux display-popup binding.
 func Run(b tmux.Backend, popup bool) error {
 	dark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-	p := tea.NewProgram(newModel(b, dark, popup))
+	m := newModel(b, dark, popup)
+	if store, err := template.DefaultStore(); err == nil {
+		m.templates = store
+	}
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	return err
 }

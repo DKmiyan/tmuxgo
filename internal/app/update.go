@@ -247,7 +247,7 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case inputNewSession:
 			return m, m.runMutation(func() error { return m.backend.NewSession(value) }, "session created")
 		case inputNewWindow:
-			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value) }, "window created")
+			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, "") }, "window created")
 		case inputRenameSession:
 			if value == "" {
 				m.setStatus("name cannot be empty", true)
@@ -295,7 +295,9 @@ func (m model) handleCreateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch item.kind {
 		case createSplit:
 			m.mode = modeNormal
-			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID) }, "pane split")
+			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID, "") }, "pane split")
+		case createFromTemplate:
+			return m.startTemplatePicker()
 		case createSession:
 			m.mode = modeInput
 			m.inputPurpose = inputNewSession
@@ -358,9 +360,20 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		target := st.targets[st.cursor]
-		source, isWindow := st.sourceID, st.isWindow
+		source, isWindow, isTemplate := st.sourceID, st.isWindow, st.isTemplate
 		m.mode = modeNormal
 		m.move = nil
+		if isTemplate {
+			tpl, err := m.templates.Get(target)
+			if err != nil {
+				m.setStatus(err.Error(), true)
+				return m, nil
+			}
+			return m, m.runMutation(func() error {
+				_, err := tpl.Create(m.backend)
+				return err
+			}, "session created from template '"+target+"'")
+		}
 		if isWindow {
 			return m, m.runMutation(func() error { return m.backend.MoveWindow(source, target) }, "window moved")
 		}

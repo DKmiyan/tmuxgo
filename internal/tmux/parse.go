@@ -26,6 +26,7 @@ var windowFormat = strings.Join([]string{
 	"#{window_index}",
 	"#{window_name}",
 	"#{window_active}",
+	"#{window_layout}",
 }, fieldSep)
 
 var paneFormat = strings.Join([]string{
@@ -99,7 +100,7 @@ func parseSession(line string) (Session, error) {
 
 func parseWindow(line string) (Window, error) {
 	f := strings.Split(line, fieldSep)
-	if len(f) != 5 {
+	if len(f) != 6 {
 		return Window{}, errParse("window", line)
 	}
 	index, _ := strconv.Atoi(f[2])
@@ -109,6 +110,7 @@ func parseWindow(line string) (Window, error) {
 		Index:     index,
 		Name:      f[3],
 		Active:    f[4] == "1",
+		Layout:    f[5],
 	}, nil
 }
 

@@ -8,7 +8,7 @@ import (
 
 func TestBuildTreeSortsAndNests(t *testing.T) {
 	sessions := "$0\talpha\t1\t100\n$1\tbeta\t0\t200\n"
-	windows := "@0\t$0\t1\teditor\t0\n@1\t$0\t0\tshell\t1\n@2\t$1\t0\tlogs\t1\n"
+	windows := "@0\t$0\t1\teditor\t0\te5b1,160x40,0,0,2\n@1\t$0\t0\tshell\t1\tb2a3,160x40,0,0,1\n@2\t$1\t0\tlogs\t1\tc4d5,160x40,0,0,3\n"
 	panes := "%0\t@0\t1\t0\tvim\t/src\n%1\t@0\t0\t1\tbash\t/tmp\n%2\t@1\t0\t1\tbash\t/root\n%3\t@2\t0\t1\ttail\t/var\n"
 
 	tree, err := buildTree(sessions, windows, panes)

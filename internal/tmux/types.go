@@ -17,7 +17,8 @@ type Window struct {
 	SessionID string // owning session ID
 	Index     int
 	Name      string
-	Active    bool // current window of its session
+	Active    bool   // current window of its session
+	Layout    string // tmux layout string (restores split structure)
 	Panes     []Pane
 }
 
