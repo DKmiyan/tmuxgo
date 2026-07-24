@@ -101,6 +101,7 @@ type moveState struct {
 	sourceID   string
 	isWindow   bool // moving a window between sessions; false = pane between windows
 	isTemplate bool // picking a session template to instantiate
+	isSocket   bool // picking a tmux server socket to switch to
 }
 
 func (m model) startMove() (tea.Model, tea.Cmd) {
@@ -213,6 +214,59 @@ func (m model) startRenameTemplate() (tea.Model, tea.Cmd) {
 	m.input.CursorEnd()
 	m.mode = modeInput
 	return m, m.input.Focus()
+}
+
+// --- socket switcher ---
+
+// startSocketPicker lists the user's tmux server sockets to switch to.
+func (m model) startSocketPicker() (tea.Model, tea.Cmd) {
+	if m.listSockets == nil || m.backendFor == nil {
+		m.setStatus("socket switching unavailable", true)
+		return m, nil
+	}
+	names, err := m.listSockets()
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return m, nil
+	}
+	st := &moveState{title: "Switch tmux server socket:", isSocket: true}
+	if m.socket != "" {
+		st.labels = append(st.labels, "default")
+		st.targets = append(st.targets, "")
+	}
+	for _, n := range names {
+		if n == m.socket {
+			continue
+		}
+		st.labels = append(st.labels, n)
+		st.targets = append(st.targets, n)
+	}
+	if len(st.targets) == 0 {
+		m.setStatus("no other tmux server sockets", false)
+		return m, nil
+	}
+	m.move = st
+	m.mode = modeMove
+	return m, nil
+}
+
+// switchSocket rebinds the model to another tmux server socket and resets
+// all server-dependent state.
+func (m *model) switchSocket(socket string) {
+	m.backend = m.backendFor(socket)
+	m.socket = socket
+	m.tree = nil
+	m.rows = nil
+	m.cursor = 0
+	m.offset = 0
+	m.expanded = make(map[string]bool)
+	m.filter = ""
+	m.previewCache = make(map[string]string)
+	if socket == "" {
+		m.setStatus("socket: default", false)
+	} else {
+		m.setStatus("socket: "+socket, false)
+	}
 }
 
 // --- delete ---

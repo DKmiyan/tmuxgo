@@ -48,6 +48,7 @@ func DefaultKeys() map[string][]string {
 		"preview":  {"p"},
 		"help":     {"?"},
 		"settings": {","},
+		"socket":   {"S"},
 		"quit":     {"q", "ctrl+c"},
 	}
 }

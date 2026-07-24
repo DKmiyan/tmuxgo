@@ -303,6 +303,8 @@ func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeSettings
 		m.settingsCursor = 0
 		return m, nil
+	case actSocket:
+		return m.startSocketPicker()
 	}
 	return m, nil
 }
@@ -519,9 +521,13 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		target := st.targets[st.cursor]
-		source, isWindow, isTemplate := st.sourceID, st.isWindow, st.isTemplate
+		source, isWindow, isTemplate, isSocket := st.sourceID, st.isWindow, st.isTemplate, st.isSocket
 		m.mode = modeNormal
 		m.move = nil
+		if isSocket {
+			m.switchSocket(target)
+			return m, m.fetchTree
+		}
 		if isTemplate {
 			tpl, err := m.templates.Get(target)
 			if err != nil {

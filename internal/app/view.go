@@ -71,6 +71,9 @@ func (m model) renderHeader(w int) string {
 	}
 	left := m.sty.title().Render("tmuxgo") +
 		m.sty.meta().Render(fmt.Sprintf("  %s · %s", plural(len(m.tree), "session"), plural(nWindows, "window")))
+	if m.socket != "" {
+		left += m.sty.meta().Render("  ·  socket: " + m.socket)
+	}
 	return trunc(left, w)
 }
 
@@ -305,6 +308,7 @@ var helpEntries = []struct{ name, desc string }{
 	{"filter", "filter"},
 	{"preview", "toggle pane preview (wide terminals)"},
 	{"settings", "settings"},
+	{"socket", "switch tmux server socket"},
 	{"help", "this help"},
 	{"quit", "quit"},
 }

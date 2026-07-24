@@ -1022,6 +1022,56 @@ func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
 	}
 }
 
+// --- socket switcher ---
+
+func TestSocketSwitchResetsState(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	switched := []string{}
+	m.backendFor = func(socket string) tmux.Backend {
+		switched = append(switched, socket)
+		return fb
+	}
+	m.listSockets = func() ([]string, error) { return []string{"other", "third"}, nil }
+
+	m, _ = press(m, "right") // expand $1
+	m.filter = "vim"
+	m.rebuild()
+
+	m, _ = press(m, "S")
+	if m.mode != modeMove || m.move == nil || !m.move.isSocket {
+		t.Fatalf("mode = %v, want socket picker", m.mode)
+	}
+	if !reflect.DeepEqual(m.move.targets, []string{"other", "third"}) {
+		t.Fatalf("targets = %v", m.move.targets)
+	}
+	m, cmd := press(m, "enter") // cursor 0 = "other"
+	if cmd == nil {
+		t.Fatal("socket switch returned no fetch command")
+	}
+	if !reflect.DeepEqual(switched, []string{"other"}) {
+		t.Fatalf("backendFor = %v, want [other]", switched)
+	}
+	if m.socket != "other" {
+		t.Fatalf("socket = %q, want other", m.socket)
+	}
+	if len(m.expanded) != 0 || m.filter != "" || m.cursor != 0 {
+		t.Fatalf("state not reset: expanded=%v filter=%q cursor=%d", m.expanded, m.filter, m.cursor)
+	}
+	if got := m.View().Content; !strings.Contains(got, "socket: other") {
+		t.Fatalf("header missing socket name:\n%s", got)
+	}
+
+	// the current socket is excluded next time, and "default" (target "")
+	// appears only when not on the default socket
+	m2, _ := press(m, "S")
+	if !reflect.DeepEqual(m2.move.targets, []string{"", "third"}) {
+		t.Fatalf("targets after switch = %v", m2.move.targets)
+	}
+	if m2.move.labels[0] != "default" {
+		t.Fatalf("first label = %q, want default", m2.move.labels[0])
+	}
+}
+
 // --- popup mode (display-popup: quit after successful attach) ---
 
 func TestPopupQuitsAfterAttach(t *testing.T) {

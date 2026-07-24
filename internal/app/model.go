@@ -77,6 +77,12 @@ type model struct {
 	// (nil = feature unavailable)
 	templates *template.Store
 
+	// socket is the tmux server socket the backend is bound to
+	// ("" = default); backendFor and listSockets are injectable for tests
+	socket      string
+	backendFor  func(socket string) tmux.Backend
+	listSockets func() ([]string, error)
+
 	// user configuration (theme, defaults, key bindings)
 	cfg          config.Config
 	cfgPath      string
@@ -164,13 +170,14 @@ const (
 	actHelp
 	actSettings
 	actQuit
+	actSocket
 )
 
 var actionByName = map[string]action{
 	"up": actUp, "down": actDown, "expand": actExpand, "collapse": actCollapse,
 	"attach": actAttach, "new": actNew, "rename": actRename, "move": actMove,
 	"kill": actKill, "filter": actFilter, "preview": actPreview, "help": actHelp,
-	"settings": actSettings, "quit": actQuit,
+	"settings": actSettings, "quit": actQuit, "socket": actSocket,
 }
 
 // buildKeyActions flattens the action -> keys config into key -> action.
@@ -201,6 +208,8 @@ func Run(b tmux.Backend, popup bool) error {
 			m.applyConfig(cfg, path)
 		}
 	}
+	m.backendFor = func(socket string) tmux.Backend { return tmux.NewWithSocket(socket) }
+	m.listSockets = tmux.ListSockets
 	m.applyPopupDefaults()
 	p := tea.NewProgram(m)
 	_, err := p.Run()

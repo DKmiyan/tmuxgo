@@ -231,6 +231,30 @@ func TestKillCascade(t *testing.T) {
 	}
 }
 
+func TestListSockets(t *testing.T) {
+	b := newTestBackend(t)
+	socketName := b.socket // unique per test, created below
+	if err := b.NewSession("alpha"); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	names, err := ListSockets()
+	if err != nil {
+		t.Fatalf("ListSockets: %v", err)
+	}
+	found := false
+	for _, n := range names {
+		if n == socketName {
+			found = true
+		}
+		if n == "default" {
+			t.Fatal("ListSockets must exclude the default socket")
+		}
+	}
+	if !found {
+		t.Fatalf("ListSockets = %v, missing %q", names, socketName)
+	}
+}
+
 func TestCapturePane(t *testing.T) {
 	b := newTestBackend(t)
 	if err := b.NewSession("alpha"); err != nil {
