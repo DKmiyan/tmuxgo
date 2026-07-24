@@ -3,3 +3,6 @@
 /.idea/
 /.vscode/
 *.log
+
+# agent project memory (do not publish)
+AGENTS.md
