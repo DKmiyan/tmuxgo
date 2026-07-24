@@ -90,6 +90,11 @@ type model struct {
 	lastClickRow int
 	lastClickAt  time.Time
 
+	// drag & drop move: dragSource is the row index where the current
+	// drag started (-1 = no drag), dragTarget is the hovered drop row
+	dragSource int
+	dragTarget int
+
 	width  int
 	height int
 }
@@ -110,6 +115,8 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 		keyActions:   buildKeyActions(cfg),
 		mouseEnabled: cfg.Mouse,
 		lastClickRow: -1,
+		dragSource:   -1,
+		dragTarget:   -1,
 		width:        80,
 		height:       24,
 	}

@@ -155,7 +155,11 @@ func (m model) renderBody(w, bodyH int) string {
 	}
 	lines := make([]string, 0, bodyH)
 	for i := m.offset; i < end; i++ {
-		lines = append(lines, m.renderRow(m.rows[i], listW, i == m.cursor))
+		drop := false
+		if m.dragSource >= 0 && i == m.dragTarget {
+			_, _, drop = m.dropTarget(m.dragSource, i)
+		}
+		lines = append(lines, m.renderRow(m.rows[i], listW, i == m.cursor, drop))
 	}
 	for len(lines) < bodyH {
 		lines = append(lines, "")
@@ -171,7 +175,7 @@ func (m model) showPreview() bool {
 	return m.previewOn && m.width >= previewMinWidth && len(m.rows) > 0
 }
 
-func (m model) renderRow(r row, w int, selected bool) string {
+func (m model) renderRow(r row, w int, selected, dropHint bool) string {
 	indent := strings.Repeat("  ", r.depth)
 	marker := "  "
 	if r.kind != rowPane {
@@ -219,10 +223,13 @@ func (m model) renderRow(r row, w int, selected bool) string {
 	}
 	label = trunc(label, labelW)
 
-	if selected {
+	if selected || dropHint {
 		gap := w - prefixW - lipgloss.Width(label) - lipgloss.Width(meta)
 		if gap < 1 {
 			gap = 1
+		}
+		if dropHint && !selected {
+			return m.sty.dropTarget(w).Render(prefix + label + strings.Repeat(" ", gap) + meta)
 		}
 		return m.sty.selected(w).Render(prefix + label + strings.Repeat(" ", gap) + meta)
 	}
@@ -263,7 +270,8 @@ func (m model) renderHelp(w, bodyH int) string {
 	}
 	raw = append(raw, "",
 		"  mouse      click select, marker click expands,",
-		"             double-click attaches, wheel scrolls",
+		"             double-click attaches, wheel scrolls,",
+		"             drag window/pane to move it",
 		"  esc        clear filter",
 	)
 	lines := make([]string, 0, len(raw))

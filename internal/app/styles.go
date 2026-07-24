@@ -49,6 +49,11 @@ func (s *styles) selected(w int) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(s.selFg).Background(s.accent).Width(w).MaxWidth(w)
 }
 
+// dropTarget highlights the hovered drop row during a drag.
+func (s *styles) dropTarget(w int) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(s.selFg).Background(s.attached).Width(w).MaxWidth(w)
+}
+
 func (s *styles) meta() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(s.muted)
 }

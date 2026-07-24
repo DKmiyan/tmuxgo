@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,6 +64,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchTree, tick(), m.previewCmd())
 	case tea.MouseClickMsg:
 		return m.handleMouseClick(tea.Mouse(msg))
+	case tea.MouseMotionMsg:
+		return m.handleMouseMotion(tea.Mouse(msg))
+	case tea.MouseReleaseMsg:
+		return m.handleMouseRelease(tea.Mouse(msg))
 	case tea.MouseWheelMsg:
 		return m.handleMouseWheel(tea.Mouse(msg))
 	case tea.KeyPressMsg:
@@ -143,10 +148,72 @@ func (m model) handleMouseClick(ev tea.Mouse) (tea.Model, tea.Cmd) {
 	m.ensureVisible()
 	m.lastClickRow = idx
 	m.lastClickAt = time.Now()
+	// window and pane rows are draggable; the drop is resolved on release
+	if r.kind == rowWindow || r.kind == rowPane {
+		m.dragSource = idx
+	} else {
+		m.dragSource = -1
+	}
+	m.dragTarget = -1
 	if doubleClick {
 		return m, m.attach(r.id)
 	}
 	return m, m.previewCmd()
+}
+
+// handleMouseMotion tracks a drag: remember the hovered drop row so the
+// view can highlight valid targets.
+func (m model) handleMouseMotion(ev tea.Mouse) (tea.Model, tea.Cmd) {
+	if m.mode != modeNormal || m.dragSource < 0 || ev.Button != tea.MouseLeft {
+		return m, nil
+	}
+	idx := m.offset + ev.Y - 1
+	if idx < 0 || idx >= len(m.rows) {
+		idx = -1
+	}
+	if m.showPreview() && ev.X >= m.width*3/5 {
+		idx = -1
+	}
+	m.dragTarget = idx
+	if idx >= 0 {
+		if _, label, ok := m.dropTarget(m.dragSource, idx); ok {
+			m.setStatus("release to move "+label, false)
+		} else {
+			m.setStatus("not a valid drop target", true)
+		}
+	}
+	return m, nil
+}
+
+// handleMouseRelease completes a drag & drop move.
+func (m model) handleMouseRelease(ev tea.Mouse) (tea.Model, tea.Cmd) {
+	if m.dragSource < 0 {
+		return m, nil
+	}
+	src, dst := m.dragSource, m.dragTarget
+	m.dragSource, m.dragTarget = -1, -1
+	if run, label, ok := m.dropTarget(src, dst); ok {
+		return m, m.runMutation(run, "moved "+label)
+	}
+	return m, nil
+}
+
+// dropTarget validates dropping row src onto row dst: a window drops onto
+// another session, a pane drops onto another window.
+func (m model) dropTarget(srcIdx, dstIdx int) (func() error, string, bool) {
+	if srcIdx < 0 || dstIdx < 0 || srcIdx >= len(m.rows) || dstIdx >= len(m.rows) {
+		return nil, "", false
+	}
+	src, dst := m.rows[srcIdx], m.rows[dstIdx]
+	switch {
+	case src.kind == rowWindow && dst.kind == rowSession && dst.session.ID != src.session.ID:
+		return func() error { return m.backend.MoveWindow(src.window.ID, dst.session.ID) },
+			fmt.Sprintf("window '%s' → session '%s'", src.window.Name, dst.session.Name), true
+	case src.kind == rowPane && dst.kind == rowWindow && dst.window.ID != src.window.ID:
+		return func() error { return m.backend.MovePane(src.pane.ID, dst.window.ID) },
+			fmt.Sprintf("pane '%s' → window '%s'", src.pane.CurrentCommand, dst.window.Name), true
+	}
+	return nil, "", false
 }
 
 func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {

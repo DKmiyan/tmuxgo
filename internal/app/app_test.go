@@ -762,6 +762,73 @@ func TestMouseIgnoredInFilterMode(t *testing.T) {
 	}
 }
 
+// --- drag & drop move ---
+
+func motion(x, y int) tea.MouseMotionMsg {
+	return tea.MouseMotionMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+func release(x, y int) tea.MouseReleaseMsg {
+	return tea.MouseReleaseMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+func TestDragMoveWindow(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right") // expand $1: rows $1(y1) @1(y2) @2(y3) $2(y4)
+	m = apply(m, click(5, 3))
+	m = apply(m, motion(5, 4))
+	if !strings.Contains(m.status, "release to move window 'logs' → session 'personal'") {
+		t.Fatalf("drag status = %q", m.status)
+	}
+	_, cmd := m.Update(release(5, 4))
+	if cmd == nil {
+		t.Fatal("drop returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("move failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.movedWindows, [][2]string{{"@2", "$2"}}) {
+		t.Fatalf("movedWindows = %v, want [[@2 $2]]", fb.movedWindows)
+	}
+}
+
+func TestDragMovePane(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")
+	m, _ = press(m, "right") // expand @1: rows $1 @1 %1(y3) %2(y4) @2(y5) $2
+	m = apply(m, click(5, 3))
+	m = apply(m, motion(5, 5))
+	_, cmd := m.Update(release(5, 5))
+	if cmd == nil {
+		t.Fatal("drop returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("move failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.movedPanes, [][2]string{{"%1", "@2"}}) {
+		t.Fatalf("movedPanes = %v, want [[%%1 @2]]", fb.movedPanes)
+	}
+}
+
+func TestDragInvalidTargetIsNoop(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right")
+	m = apply(m, click(5, 3))  // @2
+	m = apply(m, motion(5, 2)) // over @1 (window: invalid drop)
+	nm, cmd := m.Update(release(5, 2))
+	m = nm.(model)
+	if cmd != nil {
+		t.Fatal("invalid drop must return no command")
+	}
+	if m.dragSource != -1 || m.dragTarget != -1 {
+		t.Fatal("drag state must reset after release")
+	}
+	if len(fb.movedWindows) != 0 || len(fb.movedPanes) != 0 {
+		t.Fatalf("unexpected moves: %v %v", fb.movedWindows, fb.movedPanes)
+	}
+}
+
 // --- config / settings ---
 
 func TestSettingsToggleAndSave(t *testing.T) {
