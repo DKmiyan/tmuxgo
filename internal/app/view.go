@@ -94,7 +94,7 @@ func (m model) renderFooter(w int) string {
 	case modeConfirm:
 		s = "y confirm · n cancel"
 	case modeDirPick:
-		s = "type to filter · ↑/↓ choose · enter open · esc cancel"
+		s = "tab/→ complete · ↑/↓ choose · enter accept · esc cancel"
 	case modeHelp:
 		s = "any key to close"
 	case modeSettings:
@@ -387,28 +387,27 @@ func (m model) renderDirPick(w, bodyH int) string {
 	if st == nil {
 		return ""
 	}
-	title := m.sty.title().Render("new session from directory")
-	if len(st.filtered) == 0 {
-		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
-			lipgloss.JoinVertical(lipgloss.Left, title, "", m.sty.meta().Render("no matches")))
+	title := m.sty.title().Render("new session — directory") +
+		m.sty.meta().Render("  (tab/→ complete, enter accept)")
+	if len(st.matches) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, title, "",
+			m.sty.meta().Render("  (no matching subdirectories)"))
 	}
 	vis := bodyH - 2
 	if vis < 1 {
 		vis = 1
 	}
-	if st.cursor < st.offset {
-		st.offset = st.cursor
+	offset := 0
+	if st.cursor >= vis {
+		offset = st.cursor - vis + 1
 	}
-	if st.cursor >= st.offset+vis {
-		st.offset = st.cursor - vis + 1
-	}
-	end := st.offset + vis
-	if end > len(st.filtered) {
-		end = len(st.filtered)
+	end := offset + vis
+	if end > len(st.matches) {
+		end = len(st.matches)
 	}
 	lines := []string{title, ""}
-	for i := st.offset; i < end; i++ {
-		lines = append(lines, m.pickLine(trunc(st.filtered[i], w-4), i == st.cursor))
+	for i := offset; i < end; i++ {
+		lines = append(lines, m.pickLine(trunc(st.matches[i]+"/", w-4), i == st.cursor))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }

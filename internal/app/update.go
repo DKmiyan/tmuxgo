@@ -399,7 +399,13 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		switch purpose {
 		case inputNewSession:
-			return m, m.runMutation(func() error { return m.backend.NewSession(value) }, "session created")
+			dir := m.pendingDir
+			m.pendingDir = ""
+			b := m.backend
+			return m, func() tea.Msg {
+				id, err := b.NewSessionID(value, dir)
+				return dirSessionMsg{id: id, name: value, err: err}
+			}
 		case inputNewWindow:
 			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, "") }, "window created")
 		case inputRenameSession:
@@ -466,14 +472,8 @@ func (m model) handleCreateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID, "") }, "pane split")
 		case createFromTemplate:
 			return m.startTemplatePicker()
-		case createFromDir:
-			return m.startDirPick()
 		case createSession:
-			m.mode = modeInput
-			m.inputPurpose = inputNewSession
-			m.input.Reset()
-			m.input.Prompt = "session name (empty = auto): "
-			return m, m.input.Focus()
+			return m.startNewSessionDir()
 		case createWindow:
 			m.mode = modeInput
 			m.inputPurpose = inputNewWindow

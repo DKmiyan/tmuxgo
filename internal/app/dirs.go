@@ -2,77 +2,75 @@ package app
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
-// dirPickState drives the "new session from directory" picker.
+// dirPickState holds the VSCode-style completion state for the new-session
+// directory input: subdirectory matches for the currently typed path.
 type dirPickState struct {
-	all      []string
-	filtered []string
-	cursor   int
-	offset   int
+	matches []string
+	cursor  int
 }
 
-// loadDirs returns directory candidates: zoxide's frecency-ranked list
-// when zoxide is installed, else the working directories of current panes
-// plus $HOME. The dirList hook overrides both for tests.
-func (m model) loadDirs() ([]string, error) {
-	if m.dirList != nil {
-		return m.dirList()
-	}
-	if out, err := exec.Command("zoxide", "query", "--list").Output(); err == nil {
-		var dirs []string
-		for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-			if l != "" {
-				dirs = append(dirs, l)
+// contextDir is the working directory offered as the default for a new
+// session: the selected pane's cwd (or the active pane of the selected
+// window/session), falling back to $HOME.
+func (m model) contextDir() string {
+	if r, ok := m.currentRow(); ok {
+		switch r.kind {
+		case rowPane:
+			if r.pane.CurrentPath != "" {
+				return r.pane.CurrentPath
 			}
-		}
-		if len(dirs) > 0 {
-			return dirs, nil
-		}
-	}
-	seen := map[string]bool{}
-	var dirs []string
-	for _, s := range m.tree {
-		for _, w := range s.Windows {
-			for _, p := range w.Panes {
-				if p.CurrentPath != "" && !seen[p.CurrentPath] {
-					seen[p.CurrentPath] = true
-					dirs = append(dirs, p.CurrentPath)
+		case rowWindow:
+			if d := paneDir(r.window); d != "" {
+				return d
+			}
+		case rowSession:
+			for i := range r.session.Windows {
+				if r.session.Windows[i].Active {
+					if d := paneDir(&r.session.Windows[i]); d != "" {
+						return d
+					}
 				}
 			}
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && !seen[home] {
-		dirs = append(dirs, home)
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
 	}
-	return dirs, nil
+	return "/"
 }
 
-// sessionNameForDir derives a tmux-safe session name from a directory:
-// its basename with '.', ':' and spaces replaced ('.' and ':' are illegal
-// in tmux session names).
-func sessionNameForDir(dir string) string {
-	base := filepath.Base(dir)
-	return strings.NewReplacer(".", "_", ":", "_", " ", "_").Replace(base)
+func paneDir(w *tmux.Window) string {
+	for _, p := range w.Panes {
+		if p.Active && p.CurrentPath != "" {
+			return p.CurrentPath
+		}
+	}
+	if len(w.Panes) > 0 {
+		return w.Panes[0].CurrentPath
+	}
+	return ""
 }
 
-// startDirPick opens the directory picker with candidates loaded.
-func (m model) startDirPick() (tea.Model, tea.Cmd) {
-	dirs, err := m.loadDirs()
-	if err != nil || len(dirs) == 0 {
-		m.setStatus("no directories available", true)
-		m.mode = modeNormal
-		return m, nil
-	}
-	m.dirPick = &dirPickState{all: dirs, filtered: dirs}
+// startNewSessionDir begins the new-session flow at the directory step:
+// an input prefilled with the context cwd, with live subdirectory
+// completion.
+func (m model) startNewSessionDir() (tea.Model, tea.Cmd) {
+	m.dirPick = &dirPickState{}
 	m.input.Reset()
+	m.input.SetValue(m.contextDir())
+	m.input.CursorEnd()
 	m.input.Prompt = "dir: "
 	m.mode = modeDirPick
+	m.refreshDirCompletions()
 	return m, m.input.Focus()
 }
 
@@ -88,59 +86,156 @@ func (m model) handleDirPickKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.dirPick = nil
 		m.input.Blur()
 		return m, nil
+	case "tab", "right":
+		m.applyDirCompletion()
+		return m, nil
 	case "up", "k":
 		if st.cursor > 0 {
 			st.cursor--
 		}
 		return m, nil
 	case "down", "j":
-		if st.cursor < len(st.filtered)-1 {
+		if st.cursor < len(st.matches)-1 {
 			st.cursor++
 		}
 		return m, nil
 	case "enter":
-		if len(st.filtered) == 0 {
+		dir := expandHome(m.input.Value())
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			m.setStatus("not a directory: "+dir, true)
 			return m, nil
 		}
-		dir := st.filtered[st.cursor]
-		m.mode = modeNormal
+		// directory accepted: on to the name step
+		m.pendingDir = dir
 		m.dirPick = nil
-		m.input.Blur()
-		return m.openDirSession(dir)
+		m.inputPurpose = inputNewSession
+		m.input.Reset()
+		m.input.SetValue(sessionNameForDir(dir))
+		m.input.CursorEnd()
+		m.input.Prompt = "session name: "
+		m.mode = modeInput
+		return m, m.input.Focus()
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(k)
-	f := strings.ToLower(m.input.Value())
-	st.filtered = st.filtered[:0]
-	for _, d := range st.all {
-		if f == "" || strings.Contains(strings.ToLower(d), f) {
-			st.filtered = append(st.filtered, d)
-		}
-	}
-	st.cursor = 0
-	st.offset = 0
+	m.refreshDirCompletions()
 	return m, cmd
 }
 
-// dirSessionMsg carries the result of creating a directory session.
+// refreshDirCompletions recomputes the subdirectory matches for the typed
+// path and keeps the highlight in range.
+func (m *model) refreshDirCompletions() {
+	st := m.dirPick
+	if st == nil {
+		return
+	}
+	st.matches = dirCompletions(m.input.Value())
+	if st.cursor >= len(st.matches) {
+		st.cursor = len(st.matches) - 1
+	}
+	if st.cursor < 0 {
+		st.cursor = 0
+	}
+}
+
+// applyDirCompletion completes the highlighted subdirectory into the input
+// (VSCode-style: Tab or Right descends into it).
+func (m *model) applyDirCompletion() {
+	st := m.dirPick
+	if st == nil || len(st.matches) == 0 {
+		return
+	}
+	dirPart, _ := splitPath(expandHome(m.input.Value()))
+	m.input.SetValue(joinDir(dirPart, st.matches[st.cursor]) + "/")
+	m.input.CursorEnd()
+	st.cursor = 0
+	m.refreshDirCompletions()
+}
+
+// dirCompletions lists subdirectories of the typed path's directory part
+// whose names prefix-match the fragment after the last '/' (case
+// insensitive, dot-dirs hidden unless the fragment starts with '.').
+func dirCompletions(input string) []string {
+	dirPart, frag := splitPath(expandHome(input))
+	entries, err := os.ReadDir(dirPart)
+	if err != nil {
+		return nil
+	}
+	frag = strings.ToLower(frag)
+	var matches []string
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() && !isDirSymlink(e) {
+			continue
+		}
+		if strings.HasPrefix(name, ".") && !strings.HasPrefix(frag, ".") {
+			continue
+		}
+		if frag == "" || strings.HasPrefix(strings.ToLower(name), frag) {
+			matches = append(matches, name)
+		}
+	}
+	sort.Strings(matches)
+	if len(matches) > 50 {
+		matches = matches[:50]
+	}
+	return matches
+}
+
+func isDirSymlink(e os.DirEntry) bool {
+	if e.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := e.Info()
+	return err == nil && info.IsDir()
+}
+
+// splitPath splits a path at the last '/' into directory and fragment.
+func splitPath(p string) (dir, frag string) {
+	i := strings.LastIndex(p, "/")
+	switch {
+	case i < 0:
+		return ".", p
+	case i == 0:
+		return "/", p[1:]
+	default:
+		return p[:i], p[i+1:]
+	}
+
+}
+
+// joinDir joins a directory and a name.
+func joinDir(dir, name string) string {
+	if dir == "/" {
+		return "/" + name
+	}
+	if dir == "." {
+		return name
+	}
+	return dir + "/" + name
+}
+
+// expandHome expands a leading "~" to the user's home directory.
+func expandHome(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home + p[1:]
+		}
+	}
+	return p
+}
+
+// sessionNameForDir derives a tmux-safe session name from a directory:
+// its basename with '.', ':' and spaces replaced ('.' and ':' are illegal
+// in tmux session names).
+func sessionNameForDir(dir string) string {
+	base := filepath.Base(dir)
+	return strings.NewReplacer(".", "_", ":", "_", " ", "_").Replace(base)
+}
+
+// dirSessionMsg carries the result of creating a directory-anchored session.
 type dirSessionMsg struct {
 	id   string
 	name string
 	err  error
-}
-
-// openDirSession attaches to the session named after dir, creating it
-// (anchored at dir) first when it does not exist.
-func (m model) openDirSession(dir string) (tea.Model, tea.Cmd) {
-	name := sessionNameForDir(dir)
-	for _, s := range m.tree {
-		if s.Name == name {
-			return m, m.attach(s.ID)
-		}
-	}
-	b := m.backend
-	return m, func() tea.Msg {
-		id, err := b.NewSessionID(name, dir)
-		return dirSessionMsg{id: id, name: name, err: err}
-	}
 }

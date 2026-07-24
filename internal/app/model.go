@@ -62,7 +62,8 @@ type model struct {
 	confirm *confirmState
 	move    *moveState
 	dirPick *dirPickState
-	dirList func() ([]string, error) // test hook; nil = zoxide/fallback
+	// pendingDir is the accepted directory awaiting the session-name step
+	pendingDir string
 
 	previewOn    bool
 	previewCache map[string]string

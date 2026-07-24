@@ -17,8 +17,8 @@ popup hotkey.
   first and warn about last-window/last-pane cascades)
 - Live filter (`/`), optional pane preview (`p`), mouse support
 - Session templates: capture a session's layout and recreate it later
-- Directory sessions: fuzzy-pick a project directory (zoxide-ranked when
-  zoxide is installed) and jump straight into a session anchored there
+- Directory-anchored sessions: new sessions start from the selected pane's
+  working directory, editable with VSCode-style subdirectory completion
 - Popup mode: summon the navigator inside tmux with `prefix + g`
 - Configurable keys, theme, and defaults (`~/.config/tmuxgo/config.json`)
 - One command, one static binary, no daemon, no config file required

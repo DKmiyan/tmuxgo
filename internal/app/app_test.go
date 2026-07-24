@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -29,6 +30,7 @@ type fakeBackend struct {
 	currentSession string
 
 	newSessions  []string
+	newSessionDirs []string
 	newWindows   [][2]string
 	splits       []string
 	renamedS     map[string]string
@@ -48,6 +50,7 @@ func (f *fakeBackend) NewSession(name string) error {
 
 func (f *fakeBackend) NewSessionID(name, dir string) (string, error) {
 	f.newSessions = append(f.newSessions, name)
+	f.newSessionDirs = append(f.newSessionDirs, dir)
 	return "$fake", nil
 }
 
@@ -482,7 +485,7 @@ func TestCreateChooserOptions(t *testing.T) {
 	for _, it := range m.create.items {
 		labels = append(labels, it.label)
 	}
-	want := []string{"New session", "New window in 'work'", "Split pane in 'editor'", "New session from directory…"}
+	want := []string{"New session", "New window in 'work'", "Split pane in 'editor'"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("options = %v, want %v", labels, want)
 	}
@@ -511,19 +514,30 @@ func TestNewSessionFlow(t *testing.T) {
 		m, _ = press(m, "up")
 	}
 	m, _ = press(m, "enter")
-	if m.mode != modeInput {
-		t.Fatalf("mode = %v, want input", m.mode)
+	if m.mode != modeDirPick {
+		t.Fatalf("mode = %v, want dir step", m.mode)
 	}
-	m = typeText(m, "demo")
+	// accept a real directory, then the name step
+	dir := t.TempDir()
+	m.input.SetValue(dir)
+	m, _ = press(m, "enter")
+	if m.mode != modeInput {
+		t.Fatalf("mode = %v, want name step", m.mode)
+	}
+	m.input.SetValue("demo")
 	m, cmd := press(m, "enter")
 	if cmd == nil {
 		t.Fatal("new session returned no command")
 	}
-	if msg := cmd().(mutationMsg); msg.err != nil {
-		t.Fatalf("NewSession failed: %v", msg.err)
+	msg, ok := cmd().(dirSessionMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("dirSessionMsg = %#v", msg)
 	}
 	if !reflect.DeepEqual(fb.newSessions, []string{"demo"}) {
 		t.Fatalf("newSessions = %v, want [demo]", fb.newSessions)
+	}
+	if !reflect.DeepEqual(fb.newSessionDirs, []string{dir}) {
+		t.Fatalf("newSessionDirs = %v, want [%s]", fb.newSessionDirs, dir)
 	}
 }
 
@@ -1000,17 +1014,16 @@ func TestCreateChooserIncludesTemplates(t *testing.T) {
 	m, _ = press(m, "n")
 
 	items := m.create.items
-	if items[len(items)-2].kind != createFromTemplate || items[len(items)-1].kind != createFromDir {
-		t.Fatalf("last two items = %v/%v, want template/directory",
-			items[len(items)-2].kind, items[len(items)-1].kind)
+	if items[len(items)-1].kind != createFromTemplate {
+		t.Fatalf("last item kind = %v, want createFromTemplate", items[len(items)-1].kind)
 	}
-	// default stays on the contextual item, not the template/directory entries
-	if m.create.cursor != len(items)-3 {
-		t.Fatalf("default cursor = %d, want %d", m.create.cursor, len(items)-3)
+	// default stays on the contextual item, not the template entry
+	if m.create.cursor != len(items)-2 {
+		t.Fatalf("default cursor = %d, want %d", m.create.cursor, len(items)-2)
 	}
 
 	// pick the template entry -> picker appears
-	for m.create.cursor != len(items)-2 {
+	for m.create.cursor != len(items)-1 {
 		m, _ = press(m, "down")
 	}
 	m, _ = press(m, "enter")
@@ -1043,7 +1056,7 @@ func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
 	}
 	openPicker := func(m model) model {
 		m, _ = press(m, "n")
-		for m.create.cursor != len(m.create.items)-2 { // template entry (dir is last)
+		for m.create.cursor != len(m.create.items)-1 { // template entry is last
 			m, _ = press(m, "down")
 		}
 		m, _ = press(m, "enter")
@@ -1103,7 +1116,7 @@ func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
 	}
 }
 
-// --- directory picker ---
+// --- directory step of new-session ---
 
 func TestSessionNameForDir(t *testing.T) {
 	if got := sessionNameForDir("/a/b.c:d e"); got != "b_c_d_e" {
@@ -1111,42 +1124,64 @@ func TestSessionNameForDir(t *testing.T) {
 	}
 }
 
-func TestDirPickFiltersAndCreates(t *testing.T) {
+func TestNewSessionDirFlow(t *testing.T) {
+	// real directories for the completion engine
+	root := t.TempDir()
+	for _, d := range []string{"alpha", "beta", ".hidden"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "afile"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	m, fb := newTestModel(80, 24)
-	m.dirList = func() ([]string, error) {
-		return []string{"/home/u/code/tmuxgo", "/home/u/code/other", "/tmp"}, nil
-	}
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1
+	m, _ = press(m, "right") // expand @1
+	m, _ = press(m, "down")  // %1 (cwd /home/u/code)
 	m, _ = press(m, "n")
-	last := m.create.items[len(m.create.items)-1]
-	if last.kind != createFromDir {
-		t.Fatalf("last chooser item = %+v, want createFromDir", last)
-	}
-	for m.create.cursor != len(m.create.items)-1 {
-		m, _ = press(m, "down")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up") // "New session"
 	}
 	m, _ = press(m, "enter")
+
+	// dir input prefilled with the selected pane's cwd
 	if m.mode != modeDirPick {
-		t.Fatalf("mode = %v, want dir picker", m.mode)
+		t.Fatalf("mode = %v, want dir step", m.mode)
+	}
+	if m.input.Value() != "/home/u/code" {
+		t.Fatalf("prefill = %q, want /home/u/code", m.input.Value())
 	}
 
-	m = typeText(m, "tmux")
-	if !reflect.DeepEqual(m.dirPick.filtered, []string{"/home/u/code/tmuxgo"}) {
-		t.Fatalf("filtered = %v", m.dirPick.filtered)
+	// completion: "/al" in root matches only alpha (not .hidden or afile)
+	m.input.SetValue(root + "/al")
+	m.refreshDirCompletions()
+	if !reflect.DeepEqual(m.dirPick.matches, []string{"alpha"}) {
+		t.Fatalf("matches = %v, want [alpha]", m.dirPick.matches)
+	}
+	m, _ = press(m, "tab") // complete into the directory
+	if m.input.Value() != root+"/alpha/" {
+		t.Fatalf("after tab = %q", m.input.Value())
 	}
 
-	// open: creates the session named after the basename, then attaches
+	// accept dir -> name step prefilled with the basename
+	m, _ = press(m, "enter")
+	if m.mode != modeInput || m.input.Value() != "alpha" {
+		t.Fatalf("mode = %v, name prefill = %q", m.mode, m.input.Value())
+	}
+
+	// accept name -> session created anchored at the dir, then attached
 	m, cmd := press(m, "enter")
-	if cmd == nil {
-		t.Fatal("open returned no command")
-	}
 	msg, ok := cmd().(dirSessionMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("dirSessionMsg = %#v", msg)
 	}
-	if msg.name != "tmuxgo" || msg.id != "$fake" {
+	if msg.name != "alpha" || msg.id != "$fake" {
 		t.Fatalf("dirSessionMsg = %+v", msg)
 	}
-	if !reflect.DeepEqual(fb.newSessions, []string{"tmuxgo"}) {
+	if !reflect.DeepEqual(fb.newSessions, []string{"alpha"}) {
 		t.Fatalf("newSessions = %v", fb.newSessions)
 	}
 	_, attachCmd := m.Update(msg)
@@ -1155,20 +1190,20 @@ func TestDirPickFiltersAndCreates(t *testing.T) {
 	}
 }
 
-func TestDirPickAttachesExisting(t *testing.T) {
-	m, fb := newTestModel(80, 24)
-	m.dirList = func() ([]string, error) { return []string{"/x/work"}, nil }
+func TestDirPickRejectsInvalidPath(t *testing.T) {
+	m, _ := newTestModel(80, 24)
 	m, _ = press(m, "n")
-	for m.create.cursor != len(m.create.items)-1 {
-		m, _ = press(m, "down")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up")
 	}
 	m, _ = press(m, "enter")
-	m, cmd := press(m, "enter") // session "work" already exists ($1)
-	if cmd == nil {
-		t.Fatal("no attach command for existing session")
+	m.input.SetValue("/nonexistent/xyz")
+	m, _ = press(m, "enter")
+	if m.mode != modeDirPick {
+		t.Fatalf("mode = %v, want to stay in dir step", m.mode)
 	}
-	if len(fb.newSessions) != 0 {
-		t.Fatalf("must not create a duplicate, got %v", fb.newSessions)
+	if m.status == "" || !m.statusIsErr {
+		t.Fatalf("status = %q (err=%v)", m.status, m.statusIsErr)
 	}
 }
 
