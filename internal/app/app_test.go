@@ -29,16 +29,16 @@ type fakeBackend struct {
 	captureErr     error
 	currentSession string
 
-	newSessions  []string
+	newSessions    []string
 	newSessionDirs []string
-	newWindows   [][2]string
-	splits       []string
-	renamedS     map[string]string
-	renamedW     map[string]string
-	movedWindows [][2]string
-	movedPanes   [][2]string
-	brokenPanes  []string
-	killed       []string
+	newWindows     [][2]string
+	splits         []string
+	renamedS       map[string]string
+	renamedW       map[string]string
+	movedWindows   [][2]string
+	movedPanes     [][2]string
+	brokenPanes    []string
+	killed         []string
 }
 
 func (f *fakeBackend) Tree() ([]tmux.Session, error) { return f.sessions, f.treeErr }
