@@ -98,9 +98,9 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 type moveNewKind int
 
 const (
-	newNone moveNewKind = iota
-	newWindowForPane    // first picker item breaks the pane into a new window
-	newSessionForWindow // first picker item creates a session for the window
+	newNone             moveNewKind = iota
+	newWindowForPane                // first picker item breaks the pane into a new window
+	newSessionForWindow             // first picker item creates a session for the window
 )
 
 type moveState struct {
