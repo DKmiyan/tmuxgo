@@ -177,6 +177,44 @@ func (m model) startTemplatePicker() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startDeleteTemplate asks for confirmation before deleting the picked
+// template from the store.
+func (m model) startDeleteTemplate() (tea.Model, tea.Cmd) {
+	st := m.move
+	if st == nil || !st.isTemplate {
+		return m, nil
+	}
+	name := st.targets[st.cursor]
+	store := m.templates
+	m.move = nil
+	m.confirm = &confirmState{
+		lines: []string{fmt.Sprintf("Delete template '%s'?", name),
+			"The JSON entry is removed; tmux sessions are unaffected."},
+		action: func() error { return store.Delete(name) },
+		okMsg:  "template '" + name + "' deleted",
+	}
+	m.mode = modeConfirm
+	return m, nil
+}
+
+// startRenameTemplate opens the input to rename the picked template.
+func (m model) startRenameTemplate() (tea.Model, tea.Cmd) {
+	st := m.move
+	if st == nil || !st.isTemplate {
+		return m, nil
+	}
+	name := st.targets[st.cursor]
+	m.move = nil
+	m.inputPurpose = inputRenameTemplate
+	m.inputTarget = name
+	m.input.Reset()
+	m.input.SetValue(name)
+	m.input.Prompt = "rename template: "
+	m.input.CursorEnd()
+	m.mode = modeInput
+	return m, m.input.Focus()
+}
+
 // --- delete ---
 
 type confirmState struct {

@@ -206,6 +206,31 @@ func (s *Store) Save(t Template) error {
 	return s.write(ts)
 }
 
+// Rename renames a template, rejecting empty and conflicting names.
+func (s *Store) Rename(old, new string) error {
+	if new == "" {
+		return errors.New("template name cannot be empty")
+	}
+	ts, err := s.List()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range ts {
+		if ts[i].Name == new {
+			return fmt.Errorf("template %q already exists", new)
+		}
+		if ts[i].Name == old {
+			ts[i].Name = new
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("template %q not found", old)
+	}
+	return s.write(ts)
+}
+
 // Delete removes the named template.
 func (s *Store) Delete(name string) error {
 	ts, err := s.List()

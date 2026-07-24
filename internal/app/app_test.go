@@ -171,6 +171,8 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	}
 	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
@@ -943,6 +945,80 @@ func TestCreateChooserIncludesTemplates(t *testing.T) {
 	m, cmd := press(m, "enter")
 	if cmd == nil {
 		t.Fatal("template create returned no command")
+	}
+}
+
+func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
+	dir := t.TempDir()
+	store := template.NewStore(filepath.Join(dir, "templates.json"))
+	tpl := func(name string) template.Template {
+		return template.Template{Name: name, Windows: []template.Window{{Name: "w"}}}
+	}
+	if err := store.Save(tpl("dev")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(tpl("ops")); err != nil {
+		t.Fatal(err)
+	}
+	openPicker := func(m model) model {
+		m, _ = press(m, "n")
+		for m.create.cursor != len(m.create.items)-1 {
+			m, _ = press(m, "down")
+		}
+		m, _ = press(m, "enter")
+		return m
+	}
+
+	// delete the first template ("dev") with confirmation
+	m, _ := newTestModel(80, 24)
+	m.templates = store
+	m = openPicker(m)
+	m, _ = press(m, "d")
+	if m.mode != modeConfirm || !strings.Contains(strings.Join(m.confirm.lines, "\n"), "Delete template 'dev'?") {
+		t.Fatalf("mode = %v, confirm = %+v", m.mode, m.confirm)
+	}
+	m, cmd := press(m, "y")
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("delete failed: %v", msg.err)
+	}
+	if _, err := store.Get("dev"); err == nil {
+		t.Fatal("template 'dev' must be deleted")
+	}
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal after delete", m.mode)
+	}
+
+	// rename "ops" to "prod": input is prefilled, erase then type
+	m = openPicker(m)
+	m, _ = press(m, "r")
+	if m.mode != modeInput || m.input.Value() != "ops" {
+		t.Fatalf("mode = %v, prefill = %q", m.mode, m.input.Value())
+	}
+	for i := 0; i < 3; i++ {
+		m, _ = press(m, "backspace")
+	}
+	m = typeText(m, "prod")
+	m, cmd = press(m, "enter")
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("rename failed: %v", msg.err)
+	}
+	if _, err := store.Get("prod"); err != nil {
+		t.Fatal("template 'prod' must exist after rename")
+	}
+	if _, err := store.Get("ops"); err == nil {
+		t.Fatal("template 'ops' must be gone after rename")
+	}
+
+	// rename conflict surfaces an error
+	m = openPicker(m)
+	m, _ = press(m, "r")
+	for i := 0; i < 4; i++ {
+		m, _ = press(m, "backspace")
+	}
+	m = typeText(m, "prod")
+	_, cmd = press(m, "enter")
+	if msg := cmd().(mutationMsg); msg.err == nil {
+		t.Fatal("conflicting rename must fail")
 	}
 }
 

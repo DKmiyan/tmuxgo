@@ -403,6 +403,12 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.runMutation(func() error { return m.backend.RenameWindow(target, value) }, "window renamed")
+		case inputRenameTemplate:
+			if value == "" {
+				m.setStatus("name cannot be empty", true)
+				return m, nil
+			}
+			return m, m.runMutation(func() error { return m.templates.Rename(target, value) }, "template renamed")
 		}
 		return m, nil
 	}
@@ -490,6 +496,16 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		m.mode = modeNormal
 		m.move = nil
+		return m, nil
+	case "d":
+		if st.isTemplate {
+			return m.startDeleteTemplate()
+		}
+		return m, nil
+	case "r":
+		if st.isTemplate {
+			return m.startRenameTemplate()
+		}
 		return m, nil
 	case "up", "k":
 		if st.cursor > 0 {

@@ -79,8 +79,13 @@ func (m model) renderFooter(w int) string {
 	switch m.mode {
 	case modeFilter, modeInput:
 		s = "enter apply · esc cancel"
-	case modeCreate, modeMove:
+	case modeCreate:
 		s = "↑/↓ choose · enter confirm · esc cancel"
+	case modeMove:
+		s = "↑/↓ choose · enter confirm · esc cancel"
+		if m.move != nil && m.move.isTemplate {
+			s = "↑/↓ choose · enter create · d delete · r rename · esc cancel"
+		}
 	case modeConfirm:
 		s = "y confirm · n cancel"
 	case modeHelp:
