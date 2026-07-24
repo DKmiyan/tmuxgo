@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/DKmiyan/tmuxgo/internal/config"
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
@@ -163,6 +164,7 @@ func apply(m model, msg tea.Msg) model {
 func newTestModel(width, height int) (model, *fakeBackend) {
 	fb := &fakeBackend{captureContent: "line one\nline two"}
 	m := newModel(fb, true, false)
+	m.lang = i18n.EN // hermetic: tests assert English strings
 	m = apply(m, tea.WindowSizeMsg{Width: width, Height: height})
 	m = apply(m, treeMsg(testSessions()))
 	return m, fb
@@ -938,6 +940,7 @@ func TestSettingsToggleAndSave(t *testing.T) {
 	if m.mode != modeSettings {
 		t.Fatalf("mode = %v, want settings", m.mode)
 	}
+	m, _ = press(m, "down") // language
 	m, _ = press(m, "down") // preview default
 	m, _ = press(m, "down") // mouse
 	m, _ = press(m, "enter")
@@ -971,15 +974,50 @@ func TestSettingsThemeAppliesLive(t *testing.T) {
 	if m.sty.dark || m.cfg.Theme != "light" {
 		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
 	}
-	m, _ = press(m, "enter") // light -> auto (back to detected dark)
-	if !m.sty.dark || m.cfg.Theme != "auto" {
+	m, _ = press(m, "enter") // light -> first named theme
+	if m.cfg.Theme != themeCycle[2] || m.sty.dark != builtinThemes[themeCycle[2]].dark {
 		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
+	}
+	m, _ = press(m, "left") // back to light
+	if m.sty.dark || m.cfg.Theme != "light" {
+		t.Fatalf("theme = %q dark=%v", m.cfg.Theme, m.sty.dark)
+	}
+	// cycling wraps all the way back to auto (detected dark)
+	for m.cfg.Theme != "auto" {
+		m, _ = press(m, "right")
+	}
+	if !m.sty.dark {
+		t.Fatalf("auto on dark background must be dark, theme = %q", m.cfg.Theme)
+	}
+}
+
+func TestUnknownThemeFallsBack(t *testing.T) {
+	m, _ := newTestModel(80, 24) // detected dark = true
+	cfg := config.Default()
+	cfg.Theme = "bogus"
+	m.applyConfig(cfg, "")
+	if !m.sty.dark {
+		t.Fatal("unknown theme must fall back to detected dark default")
+	}
+	if !strings.Contains(m.status, "bogus") {
+		t.Fatalf("status must warn about the unknown theme, got %q", m.status)
+	}
+}
+
+func TestThemeColorOverrideApplies(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	cfg := config.Default()
+	cfg.Colors = map[string]string{"accent": "1"}
+	m.applyConfig(cfg, "")
+	if m.sty.accent != lipgloss.Color("1") {
+		t.Fatalf("accent = %v, want override 1", m.sty.accent)
 	}
 }
 
 func TestKeymapOverride(t *testing.T) {
 	m, _ := newTestModel(80, 24)
 	cfg := config.Default()
+	cfg.Language = "en" // footer labels are asserted in English
 	cfg.Keys["new"] = []string{"N"}
 	m.applyConfig(cfg, "")
 
@@ -1440,5 +1478,156 @@ func TestProgramSmoke(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "tmuxgo") {
 		t.Fatalf("rendered output missing header:\n%q", out.String())
+	}
+}
+
+// --- i18n ---
+
+func TestSettingsLanguageCyclesLive(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, ",")
+	m, _ = press(m, "down") // language row
+	m, _ = press(m, "enter")
+	if m.cfg.Language != "en" || m.lang != i18n.EN {
+		t.Fatalf("language = %q lang = %q", m.cfg.Language, m.lang)
+	}
+	m, _ = press(m, "enter")
+	if m.cfg.Language != "zh" || m.lang != i18n.ZH {
+		t.Fatalf("language = %q lang = %q", m.cfg.Language, m.lang)
+	}
+	// the settings screen itself re-renders in Chinese
+	if got := m.View().Content; !strings.Contains(got, "语言") {
+		t.Fatalf("settings screen not in Chinese:\n%s", got)
+	}
+	m, _ = press(m, "left") // zh -> en
+	if m.cfg.Language != "en" || m.lang != i18n.EN {
+		t.Fatalf("language = %q lang = %q", m.cfg.Language, m.lang)
+	}
+}
+
+func TestChineseViewFitsWidth(t *testing.T) {
+	for _, w := range []int{40, 80, 140} {
+		m, _ := newTestModel(w, 24)
+		m.lang = i18n.ZH
+		for i, line := range strings.Split(m.View().Content, "\n") {
+			if got := lipgloss.Width(line); got > w {
+				t.Fatalf("w=%d line %d is %d cells: %q", w, i, got, line)
+			}
+		}
+	}
+}
+
+func TestChineseFooterAndDialogs(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.lang = i18n.ZH
+	if got := m.View().Content; !strings.Contains(got, "n 新建") {
+		t.Fatalf("footer not in Chinese:\n%s", got)
+	}
+	// kill confirm dialog in Chinese
+	m, _ = press(m, "d")
+	if got := m.View().Content; !strings.Contains(got, "删除会话") {
+		t.Fatalf("confirm dialog not in Chinese:\n%s", got)
+	}
+	// header counts use Chinese units
+	m, _ = press(m, "n") // cancel confirm
+	if got := m.View().Content; !strings.Contains(got, "个会话") {
+		t.Fatalf("header not in Chinese:\n%s", got)
+	}
+}
+
+// --- clickable footer ---
+
+func TestFooterSegmentsLayout(t *testing.T) {
+	m, _ := newTestModel(100, 24)
+	segs := m.footerSegments(100)
+	if len(segs) != 9 {
+		t.Fatalf("segments = %d, want 9", len(segs))
+	}
+	if segs[0].start != 0 {
+		t.Fatalf("first segment starts at %d", segs[0].start)
+	}
+	for i := 1; i < len(segs); i++ {
+		if segs[i].start != segs[i-1].end+3 {
+			t.Fatalf("segment %d not separated: prev end %d, start %d", i, segs[i-1].end, segs[i].start)
+		}
+	}
+	if segs[len(segs)-1].end > 100 {
+		t.Fatal("segments overflow width")
+	}
+	// narrower width drops trailing segments
+	narrow := m.footerSegments(30)
+	if len(narrow) == 0 || len(narrow) >= 9 {
+		t.Fatalf("narrow segments = %d, want some but not all", len(narrow))
+	}
+	if narrow[len(narrow)-1].end > 30 {
+		t.Fatal("narrow segments overflow")
+	}
+	// an active filter shifts segments right
+	m.filter = "wo"
+	if withFilter := m.footerSegments(100); withFilter[0].start == 0 {
+		t.Fatal("filter prefix must shift segments right")
+	}
+}
+
+func TestFooterClickDispatches(t *testing.T) {
+	m, _ := newTestModel(100, 24)
+	segs := m.footerSegments(100)
+	help := -1
+	for i, s := range segs {
+		if s.act == actHelp {
+			help = i
+		}
+	}
+	if help < 0 {
+		t.Fatal("no help segment")
+	}
+	m = apply(m, click(segs[help].start, 23))
+	if m.mode != modeHelp {
+		t.Fatalf("mode = %v, want help after footer click", m.mode)
+	}
+	// clicking a separator does nothing
+	m, _ = newTestModel(100, 24)
+	m = apply(m, click(segs[0].end+1, 23))
+	if m.mode != modeNormal {
+		t.Fatalf("separator click changed mode to %v", m.mode)
+	}
+	// the quit segment returns tea.Quit
+	m, _ = newTestModel(100, 24)
+	quit := segs[len(segs)-1]
+	if quit.act != actQuit {
+		t.Fatalf("last segment = %v, want quit", quit.act)
+	}
+	_, cmd := m.handleMouseClick(tea.Mouse(click(quit.start, 23)))
+	if cmd == nil {
+		t.Fatal("quit click returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("quit click cmd = %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestFooterHoverHighlights(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	segs := m.footerSegments(80)
+	m = apply(m, tea.MouseMotionMsg(tea.Mouse{X: segs[1].start, Y: 23, Button: tea.MouseNone}))
+	if m.hoverFooter != 1 {
+		t.Fatalf("hoverFooter = %d, want 1", m.hoverFooter)
+	}
+	if out := m.View().Content; !strings.Contains(out, "rename") {
+		t.Fatal("footer missing rename label")
+	}
+	// moving off the footer clears the hover
+	m = apply(m, tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseNone}))
+	if m.hoverFooter != -1 {
+		t.Fatalf("hoverFooter = %d, want -1", m.hoverFooter)
+	}
+}
+
+func TestFooterButtonMotionIsNotHover(t *testing.T) {
+	// a left-button motion is a potential drag, never a footer hover
+	m, _ := newTestModel(80, 24)
+	m = apply(m, motion(3, 23))
+	if m.hoverFooter != -1 {
+		t.Fatal("button motion must not set hover")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
@@ -17,7 +18,7 @@ func (m model) View() tea.View {
 	v.AltScreen = true
 	v.WindowTitle = "tmuxgo"
 	if m.mouseEnabled {
-		v.MouseMode = tea.MouseModeCellMotion
+		v.MouseMode = tea.MouseModeAllMotion
 	}
 	return v
 }
@@ -72,7 +73,7 @@ func (m model) renderHeader(w int) string {
 		nWindows += len(s.Windows)
 	}
 	left := m.sty.title().Render("tmuxgo") +
-		m.sty.meta().Render(fmt.Sprintf("  %s · %s", plural(len(m.tree), "session"), plural(nWindows, "window")))
+		m.sty.meta().Render(fmt.Sprintf("  %s · %s", m.plural(len(m.tree), i18n.UnitSession), m.plural(nWindows, i18n.UnitWindow)))
 	if m.socket != "" {
 		left += m.sty.meta().Render("  ·  socket: " + m.socket)
 	}
@@ -83,48 +84,113 @@ func (m model) renderFooter(w int) string {
 	var s string
 	switch m.mode {
 	case modeFilter, modeInput:
-		s = "enter apply · esc cancel"
+		s = m.tr(i18n.FooterApplyCancel)
 	case modeCreate:
-		s = "↑/↓ choose · enter confirm · esc cancel"
+		s = m.tr(i18n.FooterChooseConfirm)
 	case modeMove:
-		s = "↑/↓ choose · enter confirm · esc cancel"
+		s = m.tr(i18n.FooterChooseConfirm)
 		if m.move != nil && m.move.isTemplate {
-			s = "↑/↓ choose · enter create · d delete · r rename · esc cancel"
+			s = m.tr(i18n.FooterTemplate)
 		}
 	case modeConfirm:
-		s = "y confirm · n cancel"
+		s = m.tr(i18n.FooterConfirmYN)
 	case modeDirPick:
-		s = "tab/→ complete · ↑/↓ choose · enter accept · esc cancel"
+		s = m.tr(i18n.FooterDirPick)
 	case modeHelp:
-		s = "any key to close"
+		s = m.tr(i18n.FooterHelpClose)
 	case modeSettings:
-		s = "↑/↓ move · enter change · esc save & close"
+		s = m.tr(i18n.FooterSettings)
 	default:
-		s = m.defaultFooterHints()
-		if m.filter != "" {
-			s = fmt.Sprintf("filter: %q (esc clears) · %s", m.filter, s)
-		}
+		return m.renderFooterHints(w)
 	}
 	return trunc(m.sty.meta().Render(s), w)
 }
 
-// defaultFooterHints builds the normal-mode hint line from the configured
-// key bindings (first binding of each action).
-func (m model) defaultFooterHints() string {
-	actions := []struct{ name, label string }{
-		{"new", "new"}, {"rename", "rename"}, {"move", "move"}, {"kill", "kill"},
-		{"filter", "filter"}, {"preview", "preview"}, {"help", "help"},
-		{"settings", "settings"}, {"quit", "quit"},
+// footerSegment is one clickable normal-mode hint with its cell range
+// [start, end) in the footer line.
+type footerSegment struct {
+	label      string // e.g. "n new"
+	act        action
+	start, end int
+}
+
+// footerSegments lays out the normal-mode hints left to right, dropping
+// trailing segments that do not fit width w. An active filter prefix
+// shifts the segments right. The layout is pure: render and mouse
+// hit-testing use the same result.
+func (m model) footerSegments(w int) []footerSegment {
+	actions := []struct {
+		name  string
+		label i18n.ID
+		act   action
+	}{
+		{"new", i18n.ActNew, actNew},
+		{"rename", i18n.ActRename, actRename},
+		{"move", i18n.ActMove, actMove},
+		{"kill", i18n.ActKill, actKill},
+		{"filter", i18n.ActFilter, actFilter},
+		{"preview", i18n.ActPreview, actPreview},
+		{"help", i18n.ActHelp, actHelp},
+		{"settings", i18n.ActSettings, actSettings},
+		{"quit", i18n.ActQuit, actQuit},
 	}
-	parts := make([]string, 0, len(actions))
-	for _, a := range actions {
+	x := 0
+	if m.filter != "" {
+		x = lipgloss.Width(m.tr(i18n.FilterActive, m.filter, ""))
+	}
+	segs := make([]footerSegment, 0, len(actions))
+	for i, a := range actions {
 		k := "?"
 		if keys := m.cfg.Keys[a.name]; len(keys) > 0 {
 			k = keys[0]
 		}
-		parts = append(parts, k+" "+a.label)
+		label := k + " " + m.tr(a.label)
+		segW := lipgloss.Width(label)
+		need := segW
+		if i > 0 {
+			need += 3 // " · " separator
+		}
+		if x+need > w {
+			break
+		}
+		if i > 0 {
+			x += 3
+		}
+		segs = append(segs, footerSegment{label: label, act: a.act, start: x, end: x + segW})
+		x += segW
 	}
-	return strings.Join(parts, " · ")
+	return segs
+}
+
+// footerHit returns the index of the footer segment containing cell x, or
+// -1 when x is on a separator, the filter prefix, or empty space.
+func (m model) footerHit(x, w int) int {
+	for i, s := range m.footerSegments(w) {
+		if x >= s.start && x < s.end {
+			return i
+		}
+	}
+	return -1
+}
+
+// renderFooterHints renders the normal-mode hints with the hovered segment
+// highlighted (mouse hover).
+func (m model) renderFooterHints(w int) string {
+	var b strings.Builder
+	if m.filter != "" {
+		b.WriteString(m.sty.meta().Render(m.tr(i18n.FilterActive, m.filter, "")))
+	}
+	for i, s := range m.footerSegments(w) {
+		if i > 0 {
+			b.WriteString(m.sty.meta().Render(" · "))
+		}
+		if i == m.hoverFooter {
+			b.WriteString(lipgloss.NewStyle().Foreground(m.sty.accent).Bold(true).Render(s.label))
+		} else {
+			b.WriteString(m.sty.meta().Render(s.label))
+		}
+	}
+	return trunc(b.String(), w)
 }
 
 func (m model) renderPromptOrStatus(w int) string {
@@ -145,12 +211,12 @@ func (m model) renderPromptOrStatus(w int) string {
 func (m model) renderBody(w, bodyH int) string {
 	if !m.loaded {
 		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
-			m.sty.meta().Render("loading…"))
+			m.sty.meta().Render(m.tr(i18n.Loading)))
 	}
 	if len(m.rows) == 0 {
-		hint := "No tmux sessions. Press n to create one."
+		hint := m.tr(i18n.NoSessions)
 		if m.filter != "" {
-			hint = fmt.Sprintf("No matches for %q.", m.filter)
+			hint = m.tr(i18n.NoMatches, m.filter)
 		}
 		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
 			m.sty.meta().Render(hint))
@@ -207,13 +273,13 @@ func (m model) renderRow(r row, w int, selected, dropHint bool) string {
 			dot = "●"
 		}
 		label = r.session.Name
-		meta = fmt.Sprintf("%s · %s ago", plural(len(r.session.Windows), "window"), tmux.HumanAge(r.session.Activity))
+		meta = m.tr(i18n.SessionMeta, m.plural(len(r.session.Windows), i18n.UnitWindow), tmux.HumanAge(r.session.Activity))
 	case rowWindow:
 		if r.window.Active {
 			dot = "●"
 		}
 		label = fmt.Sprintf("%d: %s", r.window.Index, r.window.Name)
-		meta = plural(len(r.window.Panes), "pane")
+		meta = m.plural(len(r.window.Panes), i18n.UnitPane)
 	case rowPane:
 		if r.pane.Active {
 			dot = "●"
@@ -276,15 +342,15 @@ func shortPath(p string) string {
 // --- dialogs (replace the body area) ---
 
 func (m model) renderHelp(w, bodyH int) string {
-	raw := []string{"keys", ""}
+	raw := []string{m.tr(i18n.HelpTitle), ""}
 	for _, e := range helpEntries {
-		raw = append(raw, fmt.Sprintf("  %-10s %s", strings.Join(m.cfg.Keys[e.name], "/"), e.desc))
+		raw = append(raw, fmt.Sprintf("  %-10s %s", strings.Join(m.cfg.Keys[e.name], "/"), m.tr(e.desc)))
 	}
 	raw = append(raw, "",
-		"  mouse      click select, marker click expands,",
-		"             double-click attaches, wheel scrolls,",
-		"             drag window/pane to move it",
-		"  esc        clear filter",
+		fmt.Sprintf("  %-10s %s", "mouse", m.tr(i18n.HelpMouse1)),
+		"             "+m.tr(i18n.HelpMouse2),
+		"             "+m.tr(i18n.HelpMouse3),
+		fmt.Sprintf("  %-10s %s", "esc", m.tr(i18n.HelpEscClear)),
 	)
 	lines := make([]string, 0, len(raw))
 	for i, l := range raw {
@@ -299,47 +365,60 @@ func (m model) renderHelp(w, bodyH int) string {
 }
 
 // helpEntries lists bindable actions in help order.
-var helpEntries = []struct{ name, desc string }{
-	{"up", "move up"},
-	{"down", "move down"},
-	{"expand", "expand / enter first child"},
-	{"collapse", "collapse / go to parent"},
-	{"attach", "attach to selected session/window/pane"},
-	{"new", "new session / window / split pane / from template"},
-	{"rename", "rename session/window"},
-	{"move", "move window/pane"},
-	{"kill", "kill session/window/pane (confirms first)"},
-	{"filter", "filter"},
-	{"preview", "toggle pane preview (wide terminals)"},
-	{"settings", "settings"},
-	{"socket", "switch tmux server socket"},
-	{"help", "this help"},
-	{"quit", "quit"},
+var helpEntries = []struct {
+	name string
+	desc i18n.ID
+}{
+	{"up", i18n.HelpUp},
+	{"down", i18n.HelpDown},
+	{"expand", i18n.HelpExpand},
+	{"collapse", i18n.HelpCollapse},
+	{"attach", i18n.HelpAttach},
+	{"new", i18n.HelpNew},
+	{"rename", i18n.HelpRename},
+	{"move", i18n.HelpMove},
+	{"kill", i18n.HelpKill},
+	{"filter", i18n.HelpFilter},
+	{"preview", i18n.HelpPreview},
+	{"settings", i18n.HelpSettings},
+	{"socket", i18n.HelpSocket},
+	{"help", i18n.HelpHelp},
+	{"quit", i18n.HelpQuit},
 }
 
 func (m model) renderSettings(w, bodyH int) string {
 	values := []struct{ label, value string }{
-		{"theme", m.cfg.Theme},
-		{"preview on start", onOff(m.cfg.PreviewDefault)},
-		{"mouse", onOff(m.cfg.Mouse)},
+		{m.tr(i18n.SetTheme), m.cfg.Theme},
+		{m.tr(i18n.SetLanguage), m.cfg.Language},
+		{m.tr(i18n.SetPreviewStart), m.onOff(m.cfg.PreviewDefault)},
+		{m.tr(i18n.SetMouse), m.onOff(m.cfg.Mouse)},
 	}
-	lines := []string{m.sty.title().Render("settings"), ""}
+	lines := []string{m.sty.title().Render(m.tr(i18n.SettingsTitle)), ""}
 	for i, v := range values {
-		line := fmt.Sprintf("%-18s %s", v.label, v.value)
-		lines = append(lines, m.pickLine(line, i == m.settingsCursor))
+		lines = append(lines, m.pickLine(padCells(v.label, 18)+v.value, i == m.settingsCursor))
 	}
 	lines = append(lines, "",
-		m.sty.meta().Render("keys are configurable in:"),
+		m.sty.meta().Render(m.tr(i18n.SettingsHint)),
+		m.sty.meta().Render(m.tr(i18n.SettingsKeysIn)),
 		m.sty.meta().Render(trunc(m.cfgPath, w-12)))
 	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
 }
 
-func onOff(b bool) string {
-	if b {
-		return "on"
+// padCells right-pads s with spaces to w display cells (CJK-aware).
+func padCells(s string, w int) string {
+	pad := w - lipgloss.Width(s)
+	if pad < 1 {
+		pad = 1
 	}
-	return "off"
+	return s + strings.Repeat(" ", pad)
+}
+
+func (m model) onOff(b bool) string {
+	if b {
+		return m.tr(i18n.On)
+	}
+	return m.tr(i18n.Off)
 }
 
 func (m model) renderCreate(w, bodyH int) string {
@@ -347,7 +426,7 @@ func (m model) renderCreate(w, bodyH int) string {
 	if c == nil {
 		return ""
 	}
-	lines := []string{m.sty.title().Render("create"), ""}
+	lines := []string{m.sty.title().Render(m.tr(i18n.CreateTitle)), ""}
 	for i, item := range c.items {
 		lines = append(lines, m.pickLine(trunc(item.label, w-12), i == c.cursor))
 	}
@@ -364,7 +443,7 @@ func (m model) renderConfirm(w, bodyH int) string {
 	for _, l := range c.lines {
 		lines = append(lines, m.sty.dangerText().Render(trunc(l, w-10)))
 	}
-	lines = append(lines, "", m.sty.meta().Render("[y] confirm    [n/esc] cancel"))
+	lines = append(lines, "", m.sty.meta().Render(m.tr(i18n.ConfirmHint)))
 	box := m.sty.dangerBox().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
 }
@@ -387,11 +466,11 @@ func (m model) renderDirPick(w, bodyH int) string {
 	if st == nil {
 		return ""
 	}
-	title := m.sty.title().Render("new session — directory") +
-		m.sty.meta().Render("  (tab/→ complete, enter accept)")
+	title := m.sty.title().Render(m.tr(i18n.DirPickTitle)) +
+		m.sty.meta().Render(m.tr(i18n.DirPickHint))
 	if len(st.matches) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, title, "",
-			m.sty.meta().Render("  (no matching subdirectories)"))
+			m.sty.meta().Render(m.tr(i18n.DirPickNone)))
 	}
 	vis := bodyH - 2
 	if vis < 1 {

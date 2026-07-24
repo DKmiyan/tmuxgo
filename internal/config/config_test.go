@@ -39,13 +39,22 @@ func TestLoadOverlayKeepsDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsBadTheme(t *testing.T) {
+func TestLoadAcceptsThemeNames(t *testing.T) {
+	// Named themes (and even unknown names) pass through; the app resolves
+	// them and falls back to the default.
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"theme":"solarized"}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"theme":"solarized-dark","language":"zh"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("invalid theme must be rejected")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Theme != "solarized-dark" {
+		t.Fatalf("theme = %q", cfg.Theme)
+	}
+	if cfg.Language != "zh" {
+		t.Fatalf("language = %q", cfg.Language)
 	}
 }
 
@@ -53,6 +62,7 @@ func TestSaveAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "config.json")
 	cfg := Default()
 	cfg.Theme = "light"
+	cfg.Colors = map[string]string{"accent": "99"}
 	cfg.Keys["new"] = []string{"N"}
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -63,5 +73,8 @@ func TestSaveAndReload(t *testing.T) {
 	}
 	if got.Theme != "light" || got.Keys["new"][0] != "N" {
 		t.Fatalf("reloaded = %+v", got)
+	}
+	if got.Colors["accent"] != "99" {
+		t.Fatalf("reloaded colors = %+v", got.Colors)
 	}
 }

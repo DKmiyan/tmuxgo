@@ -76,7 +76,8 @@ path on purpose: the tmux server's PATH may not include `~/.local/bin`.)
 | `q` | quit |
 
 Mouse: click selects, clicking an expand marker toggles it, double-click
-attaches, wheel scrolls.
+attaches, wheel scrolls, drag a window/pane onto a row to move it. The
+footer hints are clickable too (hover highlights them).
 
 ## CLI
 
@@ -97,6 +98,7 @@ tmuxgo template list / delete
 ```json
 {
   "theme": "auto",
+  "language": "auto",
   "preview_default": false,
   "mouse": true,
   "keys": {
@@ -106,7 +108,18 @@ tmuxgo template list / delete
 }
 ```
 
-`theme` is `auto`, `dark`, or `light`. Actions under `keys`: `up`, `down`,
+`theme` is `auto` (follows the terminal background) or a builtin theme:
+`dark`, `light`, `catppuccin-mocha`, `catppuccin-latte`, `nord`,
+`gruvbox-dark`, `gruvbox-light`, `dracula`, `solarized-dark`,
+`solarized-light`, `tokyo-night`. Press `,` in the TUI to cycle themes
+live. Individual colors can be overridden, e.g.
+`"colors": {"accent": "99", "selFg": "#ffffff"}` (keys: `accent`,
+`success`, `attached`, `danger`, `muted`, `selFg`).
+
+`language` is `auto` (follows `LC_ALL`/`LANG`), `en`, or `zh` — the TUI and
+CLI ship in English and Chinese, no language packs needed.
+
+Actions under `keys`: `up`, `down`,
 `expand`, `collapse`, `attach`, `new`, `rename`, `move`, `kill`, `filter`,
 `preview`, `help`, `settings`, `quit`.
 

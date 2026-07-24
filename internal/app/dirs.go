@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
 
@@ -72,7 +73,7 @@ func (m model) startDirStep(purpose inputPurpose, targetID, namePrompt string) (
 	m.input.Reset()
 	m.input.SetValue(m.contextDir())
 	m.input.CursorEnd()
-	m.input.Prompt = "dir: "
+	m.input.Prompt = m.tr(i18n.PromptDir)
 	m.mode = modeDirPick
 	m.refreshDirCompletions()
 	return m, m.input.Focus()
@@ -106,7 +107,7 @@ func (m model) handleDirPickKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		dir := expandHome(m.input.Value())
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			m.setStatus("not a directory: "+dir, true)
+			m.setStatus(m.tr(i18n.NotADirectory, dir), true)
 			return m, nil
 		}
 		// directory accepted: on to the name step

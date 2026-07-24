@@ -12,8 +12,15 @@ import (
 // Config is tmuxgo's user configuration. Load starts from Default and
 // overlays the file, so missing keys keep their defaults.
 type Config struct {
-	// Theme is "auto", "dark", or "light".
+	// Theme is "auto", a builtin theme name ("dark", "light",
+	// "catppuccin-mocha", ...). Unknown names fall back to the default.
 	Theme string `json:"theme"`
+	// Language is "auto", "en", or "zh". "auto" follows LC_ALL/LANG.
+	Language string `json:"language"`
+	// Colors overrides individual semantic colors of the theme (keys:
+	// accent, success, attached, danger, muted, selFg; values: any
+	// lipgloss color spec like "63" or "#cba6f7").
+	Colors map[string]string `json:"colors,omitempty"`
 	// PreviewDefault enables the pane preview at startup.
 	PreviewDefault bool `json:"preview_default"`
 	// Mouse enables mouse interactions in the TUI.
@@ -26,9 +33,10 @@ type Config struct {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Theme: "auto",
-		Mouse: true,
-		Keys:  DefaultKeys(),
+		Theme:    "auto",
+		Language: "auto",
+		Mouse:    true,
+		Keys:     DefaultKeys(),
 	}
 }
 
@@ -76,11 +84,8 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
-	switch cfg.Theme {
-	case "", "auto", "dark", "light":
-	default:
-		return cfg, fmt.Errorf("invalid theme %q (want auto, dark, or light)", cfg.Theme)
-	}
+	// Theme names are resolved by the app (unknown ones fall back to the
+	// default), so any non-empty string passes here.
 	if cfg.Theme == "" {
 		cfg.Theme = "auto"
 	}

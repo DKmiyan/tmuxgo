@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 )
 
 // --- create ---
@@ -29,10 +31,10 @@ type createState struct {
 }
 
 func (m model) startCreate() (tea.Model, tea.Cmd) {
-	items := []createItem{{label: "New session", kind: createSession}}
+	items := []createItem{{label: m.tr(i18n.NewSession), kind: createSession}}
 	if r, ok := m.currentRow(); ok {
 		items = append(items, createItem{
-			label:    fmt.Sprintf("New window in '%s'", r.session.Name),
+			label:    m.tr(i18n.NewWindowIn, r.session.Name),
 			kind:     createWindow,
 			targetID: r.session.ID,
 		})
@@ -43,7 +45,7 @@ func (m model) startCreate() (tea.Model, tea.Cmd) {
 			}
 			if paneID != "" {
 				items = append(items, createItem{
-					label:    fmt.Sprintf("Split pane in '%s'", r.window.Name),
+					label:    m.tr(i18n.SplitPaneIn, r.window.Name),
 					kind:     createSplit,
 					targetID: paneID,
 				})
@@ -54,7 +56,7 @@ func (m model) startCreate() (tea.Model, tea.Cmd) {
 	def := len(items) - 1
 	if m.templates != nil {
 		if ts, err := m.templates.List(); err == nil && len(ts) > 0 {
-			items = append(items, createItem{label: "New session from template…", kind: createFromTemplate})
+			items = append(items, createItem{label: m.tr(i18n.NewFromTemplate), kind: createFromTemplate})
 		}
 	}
 	m.create = &createState{items: items, cursor: def}
@@ -71,20 +73,20 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 	}
 	switch r.kind {
 	case rowPane:
-		m.setStatus("cannot rename a pane", true)
+		m.setStatus(m.tr(i18n.CannotRenamePane), true)
 		return m, nil
 	case rowSession:
 		m.inputPurpose = inputRenameSession
 		m.inputTarget = r.session.ID
 		m.input.Reset()
 		m.input.SetValue(r.session.Name)
-		m.input.Prompt = "rename session: "
+		m.input.Prompt = m.tr(i18n.PromptRenameSession)
 	case rowWindow:
 		m.inputPurpose = inputRenameWindow
 		m.inputTarget = r.window.ID
 		m.input.Reset()
 		m.input.SetValue(r.window.Name)
-		m.input.Prompt = "rename window: "
+		m.input.Prompt = m.tr(i18n.PromptRenameWindow)
 	}
 	m.input.CursorEnd()
 	m.mode = modeInput
@@ -120,34 +122,34 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 	}
 	switch r.kind {
 	case rowSession:
-		m.setStatus("sessions cannot be moved", true)
+		m.setStatus(m.tr(i18n.SessionsCannotMove), true)
 		return m, nil
 	case rowWindow:
 		st := &moveState{
-			title:    fmt.Sprintf("Move window '%s' to session:", r.window.Name),
+			title:    m.tr(i18n.MoveWindowTitle, r.window.Name),
 			sourceID: r.window.ID,
 			isWindow: true,
 			newKind:  newSessionForWindow,
 		}
-		st.labels = append(st.labels, "+ New session")
+		st.labels = append(st.labels, m.tr(i18n.NewSessionItem))
 		st.targets = append(st.targets, "")
 		for i := range m.tree {
 			s := &m.tree[i]
 			if s.ID == r.session.ID {
 				continue
 			}
-			st.labels = append(st.labels, fmt.Sprintf("%s (%s)", s.Name, plural(len(s.Windows), "window")))
+			st.labels = append(st.labels, fmt.Sprintf("%s (%s)", s.Name, m.plural(len(s.Windows), i18n.UnitWindow)))
 			st.targets = append(st.targets, s.ID)
 		}
 		m.move = st
 		m.mode = modeMove
 	case rowPane:
 		st := &moveState{
-			title:    fmt.Sprintf("Move pane '%s' to window:", r.pane.CurrentCommand),
+			title:    m.tr(i18n.MovePaneTitle, r.pane.CurrentCommand),
 			sourceID: r.pane.ID,
 			newKind:  newWindowForPane,
 		}
-		st.labels = append(st.labels, fmt.Sprintf("+ New window in '%s'", r.session.Name))
+		st.labels = append(st.labels, m.tr(i18n.NewWindowInItem, r.session.Name))
 		st.targets = append(st.targets, "")
 		for i := range m.tree {
 			s := &m.tree[i]
@@ -172,12 +174,12 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 func (m model) startTemplatePicker() (tea.Model, tea.Cmd) {
 	ts, err := m.templates.List()
 	if err != nil || len(ts) == 0 {
-		m.setStatus("no templates saved", true)
+		m.setStatus(m.tr(i18n.NoTemplates), true)
 		return m, nil
 	}
-	st := &moveState{title: "New session from template:", isTemplate: true}
+	st := &moveState{title: m.tr(i18n.TemplatePickerTitle), isTemplate: true}
 	for _, t := range ts {
-		st.labels = append(st.labels, fmt.Sprintf("%s (%s)", t.Name, plural(len(t.Windows), "window")))
+		st.labels = append(st.labels, fmt.Sprintf("%s (%s)", t.Name, m.plural(len(t.Windows), i18n.UnitWindow)))
 		st.targets = append(st.targets, t.Name)
 	}
 	m.move = st
@@ -196,10 +198,10 @@ func (m model) startDeleteTemplate() (tea.Model, tea.Cmd) {
 	store := m.templates
 	m.move = nil
 	m.confirm = &confirmState{
-		lines: []string{fmt.Sprintf("Delete template '%s'?", name),
-			"The JSON entry is removed; tmux sessions are unaffected."},
+		lines: []string{m.tr(i18n.DeleteTemplateQ, name),
+			m.tr(i18n.DeleteTemplateNote)},
 		action: func() error { return store.Delete(name) },
-		okMsg:  "template '" + name + "' deleted",
+		okMsg:  m.tr(i18n.TemplateDeleted, name),
 	}
 	m.mode = modeConfirm
 	return m, nil
@@ -217,7 +219,7 @@ func (m model) startRenameTemplate() (tea.Model, tea.Cmd) {
 	m.inputTarget = name
 	m.input.Reset()
 	m.input.SetValue(name)
-	m.input.Prompt = "rename template: "
+	m.input.Prompt = m.tr(i18n.PromptRenameTemplate)
 	m.input.CursorEnd()
 	m.mode = modeInput
 	return m, m.input.Focus()
@@ -228,7 +230,7 @@ func (m model) startRenameTemplate() (tea.Model, tea.Cmd) {
 // startSocketPicker lists the user's tmux server sockets to switch to.
 func (m model) startSocketPicker() (tea.Model, tea.Cmd) {
 	if m.listSockets == nil || m.backendFor == nil {
-		m.setStatus("socket switching unavailable", true)
+		m.setStatus(m.tr(i18n.SocketUnavailable), true)
 		return m, nil
 	}
 	names, err := m.listSockets()
@@ -236,9 +238,9 @@ func (m model) startSocketPicker() (tea.Model, tea.Cmd) {
 		m.setStatus(err.Error(), true)
 		return m, nil
 	}
-	st := &moveState{title: "Switch tmux server socket:", isSocket: true}
+	st := &moveState{title: m.tr(i18n.SocketPickerTitle), isSocket: true}
 	if m.socket != "" {
-		st.labels = append(st.labels, "default")
+		st.labels = append(st.labels, m.tr(i18n.SocketDefault))
 		st.targets = append(st.targets, "")
 	}
 	for _, n := range names {
@@ -249,7 +251,7 @@ func (m model) startSocketPicker() (tea.Model, tea.Cmd) {
 		st.targets = append(st.targets, n)
 	}
 	if len(st.targets) == 0 {
-		m.setStatus("no other tmux server sockets", false)
+		m.setStatus(m.tr(i18n.NoOtherSockets), false)
 		return m, nil
 	}
 	m.move = st
@@ -270,7 +272,7 @@ func (m *model) switchSocket(socket string) {
 	m.filter = ""
 	m.previewCache = make(map[string]string)
 	if socket == "" {
-		m.setStatus("socket: default", false)
+		m.setStatus(m.tr(i18n.SocketNowDefault), false)
 	} else {
 		m.setStatus("socket: "+socket, false)
 	}
@@ -298,51 +300,41 @@ func (m model) startDelete() (tea.Model, tea.Cmd) {
 			nPanes += len(w.Panes)
 		}
 		c.lines = []string{
-			fmt.Sprintf("Kill session '%s'?", s.Name),
-			fmt.Sprintf("%s and %s will be killed.",
-				plural(len(s.Windows), "window"), plural(nPanes, "pane")),
+			m.tr(i18n.KillSessionQ, s.Name),
+			m.tr(i18n.WillBeKilled2,
+				m.plural(len(s.Windows), i18n.UnitWindow), m.plural(nPanes, i18n.UnitPane)),
 		}
 		id := s.ID
 		c.action = func() error { return m.backend.KillSession(id) }
-		c.okMsg = "session killed"
+		c.okMsg = m.tr(i18n.SessionKilled)
 	case rowWindow:
 		w := r.window
 		c.lines = []string{
-			fmt.Sprintf("Kill window '%s'?", w.Name),
-			fmt.Sprintf("%s will be killed.", plural(len(w.Panes), "pane")),
+			m.tr(i18n.KillWindowQ, w.Name),
+			m.tr(i18n.WillBeKilled1, m.plural(len(w.Panes), i18n.UnitPane)),
 		}
 		if len(r.session.Windows) == 1 {
-			c.lines = append(c.lines,
-				fmt.Sprintf("This is the last window in '%s'; the session will be killed.", r.session.Name))
+			c.lines = append(c.lines, m.tr(i18n.LastWindowCascade, r.session.Name))
 		}
 		id := w.ID
 		c.action = func() error { return m.backend.KillWindow(id) }
-		c.okMsg = "window killed"
+		c.okMsg = m.tr(i18n.WindowKilled)
 	case rowPane:
 		p := r.pane
 		c.lines = []string{
-			fmt.Sprintf("Kill pane '%s' (%s)?", p.CurrentCommand, p.ID),
+			m.tr(i18n.KillPaneQ, p.CurrentCommand, p.ID),
 		}
 		if len(r.window.Panes) == 1 {
-			c.lines = append(c.lines,
-				fmt.Sprintf("This is the last pane in '%s'; the window will be closed.", r.window.Name))
+			c.lines = append(c.lines, m.tr(i18n.LastPaneCascade, r.window.Name))
 			if len(r.session.Windows) == 1 {
-				c.lines = append(c.lines,
-					fmt.Sprintf("It is also the last window in '%s'; the session will be killed.", r.session.Name))
+				c.lines = append(c.lines, m.tr(i18n.AlsoLastWindowCascade, r.session.Name))
 			}
 		}
 		id := p.ID
 		c.action = func() error { return m.backend.KillPane(id) }
-		c.okMsg = "pane killed"
+		c.okMsg = m.tr(i18n.PaneKilled)
 	}
 	m.confirm = c
 	m.mode = modeConfirm
 	return m, nil
-}
-
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
 }

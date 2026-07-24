@@ -19,26 +19,11 @@ type styles struct {
 	selFg    color.Color // foreground on the selected row
 }
 
+// newStyles builds the default palette for the detected background; named
+// themes and per-color overrides are layered on by model.applyTheme.
 func newStyles(dark bool) *styles {
-	if dark {
-		return &styles{
-			dark:     true,
-			accent:   lipgloss.Color("63"),
-			success:  lipgloss.Color("42"),
-			attached: lipgloss.Color("214"),
-			danger:   lipgloss.Color("196"),
-			muted:    lipgloss.Color("245"),
-			selFg:    lipgloss.Color("255"),
-		}
-	}
-	return &styles{
-		accent:   lipgloss.Color("25"),
-		success:  lipgloss.Color("28"),
-		attached: lipgloss.Color("166"),
-		danger:   lipgloss.Color("160"),
-		muted:    lipgloss.Color("240"),
-		selFg:    lipgloss.Color("255"),
-	}
+	def, _ := resolveTheme("auto", dark)
+	return def.styles(nil)
 }
 
 func (s *styles) title() lipgloss.Style {

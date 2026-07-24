@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/DKmiyan/tmuxgo/internal/config"
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 	"github.com/DKmiyan/tmuxgo/internal/template"
 	"github.com/DKmiyan/tmuxgo/internal/tmux"
 )
@@ -91,19 +92,23 @@ type model struct {
 	backendFor  func(socket string) tmux.Backend
 	listSockets func() ([]string, error)
 
-	// user configuration (theme, defaults, key bindings)
+	// user configuration (theme, language, defaults, key bindings)
 	cfg          config.Config
 	cfgPath      string
 	detectedDark bool
+	lang         i18n.Lang
 	keyActions   map[string]action
 
-	// settings screen cursor (0 = theme, 1 = preview default, 2 = mouse)
+	// settings screen cursor (0 = theme, 1 = language, 2 = preview
+	// default, 3 = mouse)
 	settingsCursor int
 
-	// mouse support: click selects, double-click attaches, wheel scrolls
+	// mouse support: click selects, double-click attaches, wheel scrolls;
+	// hoverFooter is the highlighted footer hint segment (-1 = none)
 	mouseEnabled bool
 	lastClickRow int
 	lastClickAt  time.Time
+	hoverFooter  int
 
 	// drag & drop move: dragSource is the row index where the current
 	// drag started (-1 = no drag), dragTarget is the hovered drop row
@@ -127,9 +132,11 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 		popup:        popup,
 		cfg:          cfg,
 		detectedDark: dark,
+		lang:         i18n.Resolve(cfg.Language, os.Getenv),
 		keyActions:   buildKeyActions(cfg),
 		mouseEnabled: cfg.Mouse,
 		lastClickRow: -1,
+		hoverFooter:  -1,
 		dragSource:   -1,
 		dragTarget:   -1,
 		width:        80,
@@ -141,23 +148,23 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 func (m *model) applyConfig(cfg config.Config, path string) {
 	m.cfg = cfg
 	m.cfgPath = path
+	m.lang = i18n.Resolve(cfg.Language, os.Getenv)
 	m.keyActions = buildKeyActions(cfg)
 	m.applyTheme()
 	m.mouseEnabled = cfg.Mouse
 	m.previewOn = cfg.PreviewDefault
 }
 
-// applyTheme rebuilds the palette from the configured theme. "auto" keeps
-// the palette detected from the terminal background.
+// applyTheme rebuilds the palette from the configured theme: "auto" follows
+// the detected terminal background, a name selects a builtin theme, and
+// cfg.Colors overrides individual semantic colors. An unknown name falls
+// back to the detected default with a warning.
 func (m *model) applyTheme() {
-	switch m.cfg.Theme {
-	case "dark":
-		m.sty = newStyles(true)
-	case "light":
-		m.sty = newStyles(false)
-	default:
-		m.sty = newStyles(m.detectedDark)
+	def, ok := resolveTheme(m.cfg.Theme, m.detectedDark)
+	if !ok {
+		m.setStatus(m.tr(i18n.UnknownTheme, m.cfg.Theme), true)
 	}
+	m.sty = def.styles(m.cfg.Colors)
 }
 
 // action identifies a bindable normal-mode action.

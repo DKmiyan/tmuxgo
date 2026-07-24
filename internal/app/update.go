@@ -1,13 +1,14 @@
 package app
 
 import (
-	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/DKmiyan/tmuxgo/internal/config"
+	"github.com/DKmiyan/tmuxgo/internal/i18n"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -41,7 +42,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(msg.err.Error(), true)
 			return m, m.fetchTree
 		}
-		m.setStatus("session '"+msg.name+"' created", false)
+		m.setStatus(m.tr(i18n.SessionCreated, msg.name), false)
 		return m, m.attach(msg.id)
 	case errMsg:
 		m.setStatus(msg.err.Error(), true)
@@ -55,7 +56,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchTree
 	case attachMsg:
 		if msg.err != nil {
-			m.setStatus("attach failed: "+msg.err.Error(), true)
+			m.setStatus(m.tr(i18n.AttachFailed, msg.err.Error()), true)
 			return m, m.fetchTree
 		}
 		if m.popup {
@@ -127,6 +128,14 @@ func (m model) handleMouseClick(ev tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.mode != modeNormal || ev.Button != tea.MouseLeft {
 		return m, nil
 	}
+	// the footer hint segments are clickable, same as their key bindings
+	if ev.Y == m.height-1 {
+		segs := m.footerSegments(m.width)
+		if i := m.footerHit(ev.X, m.width); i >= 0 {
+			return m.dispatchAction(segs[i].act)
+		}
+		return m, nil
+	}
 	// the body starts one line below the header
 	idx := m.offset + ev.Y - 1
 	if idx < 0 || idx >= len(m.rows) {
@@ -168,10 +177,22 @@ func (m model) handleMouseClick(ev tea.Mouse) (tea.Model, tea.Cmd) {
 	return m, m.previewCmd()
 }
 
-// handleMouseMotion tracks a drag: remember the hovered drop row so the
-// view can highlight valid targets.
+// handleMouseMotion tracks footer hint hovering (no button) and drags
+// (left button): remember the hovered drop row so the view can highlight
+// valid targets.
 func (m model) handleMouseMotion(ev tea.Mouse) (tea.Model, tea.Cmd) {
-	if m.mode != modeNormal || m.dragSource < 0 || ev.Button != tea.MouseLeft {
+	if m.mode != modeNormal {
+		return m, nil
+	}
+	if ev.Button == tea.MouseNone {
+		hov := -1
+		if ev.Y == m.height-1 {
+			hov = m.footerHit(ev.X, m.width)
+		}
+		m.hoverFooter = hov
+		return m, nil
+	}
+	if m.dragSource < 0 || ev.Button != tea.MouseLeft {
 		return m, nil
 	}
 	idx := m.offset + ev.Y - 1
@@ -184,9 +205,9 @@ func (m model) handleMouseMotion(ev tea.Mouse) (tea.Model, tea.Cmd) {
 	m.dragTarget = idx
 	if idx >= 0 {
 		if _, label, ok := m.dropTarget(m.dragSource, idx); ok {
-			m.setStatus("release to move "+label, false)
+			m.setStatus(m.tr(i18n.ReleaseToMove, label), false)
 		} else {
-			m.setStatus("not a valid drop target", true)
+			m.setStatus(m.tr(i18n.InvalidDrop), true)
 		}
 	}
 	return m, nil
@@ -200,7 +221,7 @@ func (m model) handleMouseRelease(ev tea.Mouse) (tea.Model, tea.Cmd) {
 	src, dst := m.dragSource, m.dragTarget
 	m.dragSource, m.dragTarget = -1, -1
 	if run, label, ok := m.dropTarget(src, dst); ok {
-		return m, m.runMutation(run, "moved "+label)
+		return m, m.runMutation(run, m.tr(i18n.MovedX, label))
 	}
 	return m, nil
 }
@@ -215,10 +236,10 @@ func (m model) dropTarget(srcIdx, dstIdx int) (func() error, string, bool) {
 	switch {
 	case src.kind == rowWindow && dst.kind == rowSession && dst.session.ID != src.session.ID:
 		return func() error { return m.backend.MoveWindow(src.window.ID, dst.session.ID) },
-			fmt.Sprintf("window '%s' → session '%s'", src.window.Name, dst.session.Name), true
+			m.tr(i18n.MoveLabelWinSess, src.window.Name, dst.session.Name), true
 	case src.kind == rowPane && dst.kind == rowWindow && dst.window.ID != src.window.ID:
 		return func() error { return m.backend.MovePane(src.pane.ID, dst.window.ID) },
-			fmt.Sprintf("pane '%s' → window '%s'", src.pane.CurrentCommand, dst.window.Name), true
+			m.tr(i18n.MoveLabelPaneWin, src.pane.CurrentCommand, dst.window.Name), true
 	}
 	return nil, "", false
 }
@@ -263,6 +284,12 @@ func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	return m.dispatchAction(act)
+}
+
+// dispatchAction runs a normal-mode action, whether it came from a key
+// binding or from clicking a footer hint segment.
+func (m model) dispatchAction(act action) (tea.Model, tea.Cmd) {
 	switch act {
 	case actQuit:
 		return m, tea.Quit
@@ -295,14 +322,14 @@ func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeFilter
 		m.input.Reset()
 		m.input.Prompt = "/"
-		m.input.Placeholder = "filter"
+		m.input.Placeholder = m.tr(i18n.FilterPlaceholder)
 		m.filter = ""
 		m.rebuild()
 		return m, m.input.Focus()
 	case actPreview:
 		m.previewOn = !m.previewOn
 		if m.previewOn && m.width < previewMinWidth {
-			m.setStatus("preview hidden: terminal too narrow", true)
+			m.setStatus(m.tr(i18n.PreviewTooNarrow), true)
 		}
 		return m, m.previewCmd()
 	case actHelp:
@@ -318,18 +345,19 @@ func (m model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSettingsKey drives the settings screen: three toggles persisted on
-// close. Theme changes apply immediately.
+// handleSettingsKey drives the settings screen: values persisted on close.
+// Theme and language changes apply immediately.
 func (m model) handleSettingsKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc", "q":
 		m.mode = modeNormal
 		cfg, path := m.cfg, m.cfgPath
+		ok := m.tr(i18n.SettingsSaved)
 		return m, func() tea.Msg {
 			if path == "" {
 				return nil
 			}
-			return mutationMsg{err: config.Save(path, cfg), ok: "settings saved"}
+			return mutationMsg{err: config.Save(path, cfg), ok: ok}
 		}
 	case "up", "k":
 		if m.settingsCursor > 0 {
@@ -337,27 +365,43 @@ func (m model) handleSettingsKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down", "j":
-		if m.settingsCursor < 2 {
+		if m.settingsCursor < 3 {
 			m.settingsCursor++
 		}
 		return m, nil
 	case "enter", "space":
 		switch m.settingsCursor {
 		case 0:
-			switch m.cfg.Theme {
-			case "auto":
-				m.cfg.Theme = "dark"
-			case "dark":
-				m.cfg.Theme = "light"
-			default:
-				m.cfg.Theme = "auto"
-			}
+			m.cfg.Theme = nextTheme(m.cfg.Theme, 1)
 			m.applyTheme()
 		case 1:
-			m.cfg.PreviewDefault = !m.cfg.PreviewDefault
+			m.cfg.Language = nextLanguage(m.cfg.Language, 1)
+			m.lang = i18n.Resolve(m.cfg.Language, os.Getenv)
 		case 2:
+			m.cfg.PreviewDefault = !m.cfg.PreviewDefault
+		case 3:
 			m.cfg.Mouse = !m.cfg.Mouse
 			m.mouseEnabled = m.cfg.Mouse
+		}
+		return m, nil
+	case "right", "l":
+		switch m.settingsCursor {
+		case 0:
+			m.cfg.Theme = nextTheme(m.cfg.Theme, 1)
+			m.applyTheme()
+		case 1:
+			m.cfg.Language = nextLanguage(m.cfg.Language, 1)
+			m.lang = i18n.Resolve(m.cfg.Language, os.Getenv)
+		}
+		return m, nil
+	case "left", "h":
+		switch m.settingsCursor {
+		case 0:
+			m.cfg.Theme = nextTheme(m.cfg.Theme, -1)
+			m.applyTheme()
+		case 1:
+			m.cfg.Language = nextLanguage(m.cfg.Language, -1)
+			m.lang = i18n.Resolve(m.cfg.Language, os.Getenv)
 		}
 		return m, nil
 	}
@@ -409,25 +453,25 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case inputNewWindow:
 			dir := m.pendingDir
 			m.pendingDir = ""
-			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, dir) }, "window created")
+			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, dir) }, m.tr(i18n.WindowCreated))
 		case inputRenameSession:
 			if value == "" {
-				m.setStatus("name cannot be empty", true)
+				m.setStatus(m.tr(i18n.NameEmpty), true)
 				return m, nil
 			}
-			return m, m.runMutation(func() error { return m.backend.RenameSession(target, value) }, "session renamed")
+			return m, m.runMutation(func() error { return m.backend.RenameSession(target, value) }, m.tr(i18n.SessionRenamed))
 		case inputRenameWindow:
 			if value == "" {
-				m.setStatus("name cannot be empty", true)
+				m.setStatus(m.tr(i18n.NameEmpty), true)
 				return m, nil
 			}
-			return m, m.runMutation(func() error { return m.backend.RenameWindow(target, value) }, "window renamed")
+			return m, m.runMutation(func() error { return m.backend.RenameWindow(target, value) }, m.tr(i18n.WindowRenamed))
 		case inputRenameTemplate:
 			if value == "" {
-				m.setStatus("name cannot be empty", true)
+				m.setStatus(m.tr(i18n.NameEmpty), true)
 				return m, nil
 			}
-			return m, m.runMutation(func() error { return m.templates.Rename(target, value) }, "template renamed")
+			return m, m.runMutation(func() error { return m.templates.Rename(target, value) }, m.tr(i18n.TemplateRenamed))
 		case inputMoveWindowNewSession:
 			return m, m.runMutation(func() error {
 				sessID, err := m.backend.NewSessionID(value, "")
@@ -435,7 +479,7 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					return err
 				}
 				return m.backend.MoveWindow(target, sessID)
-			}, "window moved to a new session")
+			}, m.tr(i18n.WindowMovedNewSession))
 		}
 		return m, nil
 	}
@@ -471,13 +515,13 @@ func (m model) handleCreateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch item.kind {
 		case createSplit:
 			m.mode = modeNormal
-			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID, "") }, "pane split")
+			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID, "") }, m.tr(i18n.PaneSplit))
 		case createFromTemplate:
 			return m.startTemplatePicker()
 		case createSession:
-			return m.startDirStep(inputNewSession, "", "session name: ")
+			return m.startDirStep(inputNewSession, "", m.tr(i18n.PromptSessionName))
 		case createWindow:
-			return m.startDirStep(inputNewWindow, item.targetID, "window name: ")
+			return m.startDirStep(inputNewWindow, item.targetID, m.tr(i18n.PromptWindowName))
 		}
 	}
 	return m, nil
@@ -499,7 +543,7 @@ func (m model) handleConfirmKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default:
 		m.mode = modeNormal
 		m.confirm = nil
-		m.setStatus("cancelled", false)
+		m.setStatus(m.tr(i18n.Cancelled), false)
 		return m, nil
 	}
 }
@@ -543,12 +587,12 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.move = nil
 			switch st.newKind {
 			case newWindowForPane:
-				return m, m.runMutation(func() error { return m.backend.BreakPane(source) }, "pane moved to a new window")
+				return m, m.runMutation(func() error { return m.backend.BreakPane(source) }, m.tr(i18n.PaneMovedNewWindow))
 			case newSessionForWindow:
 				m.inputPurpose = inputMoveWindowNewSession
 				m.inputTarget = source
 				m.input.Reset()
-				m.input.Prompt = "new session name (empty = auto): "
+				m.input.Prompt = m.tr(i18n.PromptNewSessionAuto)
 				m.mode = modeInput
 				return m, m.input.Focus()
 			}
@@ -570,12 +614,12 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.runMutation(func() error {
 				_, err := tpl.Create(m.backend)
 				return err
-			}, "session created from template '"+target+"'")
+			}, m.tr(i18n.SessionFromTemplate, target))
 		}
 		if isWindow {
-			return m, m.runMutation(func() error { return m.backend.MoveWindow(source, target) }, "window moved")
+			return m, m.runMutation(func() error { return m.backend.MoveWindow(source, target) }, m.tr(i18n.WindowMoved))
 		}
-		return m, m.runMutation(func() error { return m.backend.MovePane(source, target) }, "pane moved")
+		return m, m.runMutation(func() error { return m.backend.MovePane(source, target) }, m.tr(i18n.PaneMoved))
 	}
 	return m, nil
 }
