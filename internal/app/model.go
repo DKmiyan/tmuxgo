@@ -62,8 +62,11 @@ type model struct {
 	confirm *confirmState
 	move    *moveState
 	dirPick *dirPickState
-	// pendingDir is the accepted directory awaiting the session-name step
-	pendingDir string
+	// pendingDir is the accepted directory awaiting the name step;
+	// pendingPurpose/pendingPrompt drive that name step
+	pendingDir     string
+	pendingPurpose inputPurpose
+	pendingPrompt  string
 
 	previewOn    bool
 	previewCache map[string]string

@@ -32,6 +32,7 @@ type fakeBackend struct {
 	newSessions    []string
 	newSessionDirs []string
 	newWindows     [][2]string
+	newWindowDirs  []string
 	splits         []string
 	renamedS       map[string]string
 	renamedW       map[string]string
@@ -56,6 +57,7 @@ func (f *fakeBackend) NewSessionID(name, dir string) (string, error) {
 
 func (f *fakeBackend) NewWindow(sessionID, name, dir string) error {
 	f.newWindows = append(f.newWindows, [2]string{sessionID, name})
+	f.newWindowDirs = append(f.newWindowDirs, dir)
 	return nil
 }
 
@@ -1204,6 +1206,48 @@ func TestDirPickRejectsInvalidPath(t *testing.T) {
 	}
 	if m.status == "" || !m.statusIsErr {
 		t.Fatalf("status = %q (err=%v)", m.status, m.statusIsErr)
+	}
+}
+
+func TestNewWindowDirFlow(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1
+	m, _ = press(m, "right") // expand @1
+	m, _ = press(m, "down")  // %1 (cwd /home/u/code)
+	m, _ = press(m, "n")
+	// choose "New window in 'work'" (index 1)
+	for m.create.cursor != 1 {
+		if m.create.cursor < 1 {
+			m, _ = press(m, "down")
+		} else {
+			m, _ = press(m, "up")
+		}
+	}
+	m, _ = press(m, "enter")
+
+	// same dir step, prefilled with the pane's cwd
+	if m.mode != modeDirPick || m.input.Value() != "/home/u/code" {
+		t.Fatalf("mode = %v, prefill = %q", m.mode, m.input.Value())
+	}
+	dir := t.TempDir()
+	m.input.SetValue(dir)
+	m, _ = press(m, "enter")
+
+	// name step prefilled with the directory basename
+	if m.mode != modeInput || m.input.Value() != filepath.Base(dir) {
+		t.Fatalf("mode = %v, name prefill = %q, want %q", m.mode, m.input.Value(), filepath.Base(dir))
+	}
+	m.input.SetValue("api")
+	m, cmd := press(m, "enter")
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("NewWindow failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.newWindows, [][2]string{{"$1", "api"}}) {
+		t.Fatalf("newWindows = %v, want [[$1 api]]", fb.newWindows)
+	}
+	if !reflect.DeepEqual(fb.newWindowDirs, []string{dir}) {
+		t.Fatalf("newWindowDirs = %v, want [%s]", fb.newWindowDirs, dir)
 	}
 }
 

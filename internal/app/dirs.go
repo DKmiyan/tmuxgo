@@ -60,10 +60,14 @@ func paneDir(w *tmux.Window) string {
 	return ""
 }
 
-// startNewSessionDir begins the new-session flow at the directory step:
-// an input prefilled with the context cwd, with live subdirectory
-// completion.
-func (m model) startNewSessionDir() (tea.Model, tea.Cmd) {
+// startDirStep begins a two-step create flow at the directory step: an
+// input prefilled with the context cwd, with live subdirectory
+// completion. After the directory is accepted, purpose/prompt drive the
+// name step; targetID is the session for window creation.
+func (m model) startDirStep(purpose inputPurpose, targetID, namePrompt string) (tea.Model, tea.Cmd) {
+	m.pendingPurpose = purpose
+	m.pendingPrompt = namePrompt
+	m.inputTarget = targetID
 	m.dirPick = &dirPickState{}
 	m.input.Reset()
 	m.input.SetValue(m.contextDir())
@@ -108,11 +112,11 @@ func (m model) handleDirPickKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// directory accepted: on to the name step
 		m.pendingDir = dir
 		m.dirPick = nil
-		m.inputPurpose = inputNewSession
+		m.inputPurpose = m.pendingPurpose
 		m.input.Reset()
 		m.input.SetValue(sessionNameForDir(dir))
 		m.input.CursorEnd()
-		m.input.Prompt = "session name: "
+		m.input.Prompt = m.pendingPrompt
 		m.mode = modeInput
 		return m, m.input.Focus()
 	}

@@ -407,7 +407,9 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return dirSessionMsg{id: id, name: value, err: err}
 			}
 		case inputNewWindow:
-			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, "") }, "window created")
+			dir := m.pendingDir
+			m.pendingDir = ""
+			return m, m.runMutation(func() error { return m.backend.NewWindow(target, value, dir) }, "window created")
 		case inputRenameSession:
 			if value == "" {
 				m.setStatus("name cannot be empty", true)
@@ -473,14 +475,9 @@ func (m model) handleCreateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case createFromTemplate:
 			return m.startTemplatePicker()
 		case createSession:
-			return m.startNewSessionDir()
+			return m.startDirStep(inputNewSession, "", "session name: ")
 		case createWindow:
-			m.mode = modeInput
-			m.inputPurpose = inputNewWindow
-			m.inputTarget = item.targetID
-			m.input.Reset()
-			m.input.Prompt = "window name (empty = auto): "
-			return m, m.input.Focus()
+			return m.startDirStep(inputNewWindow, item.targetID, "window name: ")
 		}
 	}
 	return m, nil
