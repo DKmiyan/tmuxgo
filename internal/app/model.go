@@ -24,6 +24,7 @@ const (
 	modeMove
 	modeHelp
 	modeSettings
+	modeDirPick
 )
 
 // inputPurpose identifies what a text input is collecting.
@@ -60,6 +61,8 @@ type model struct {
 	create  *createState
 	confirm *confirmState
 	move    *moveState
+	dirPick *dirPickState
+	dirList func() ([]string, error) // test hook; nil = zoxide/fallback
 
 	previewOn    bool
 	previewCache map[string]string

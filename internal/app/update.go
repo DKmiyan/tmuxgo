@@ -36,6 +36,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case dirSessionMsg:
+		if msg.err != nil {
+			m.setStatus(msg.err.Error(), true)
+			return m, m.fetchTree
+		}
+		m.setStatus("session '"+msg.name+"' created", false)
+		return m, m.attach(msg.id)
 	case errMsg:
 		m.setStatus(msg.err.Error(), true)
 		return m, nil
@@ -228,6 +235,8 @@ func (m model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(k)
 	case modeMove:
 		return m.handleMoveKey(k)
+	case modeDirPick:
+		return m.handleDirPickKey(k)
 	case modeSettings:
 		return m.handleSettingsKey(k)
 	case modeHelp:
@@ -457,6 +466,8 @@ func (m model) handleCreateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.runMutation(func() error { return m.backend.SplitPane(item.targetID, "") }, "pane split")
 		case createFromTemplate:
 			return m.startTemplatePicker()
+		case createFromDir:
+			return m.startDirPick()
 		case createSession:
 			m.mode = modeInput
 			m.inputPurpose = inputNewSession

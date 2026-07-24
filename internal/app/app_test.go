@@ -482,7 +482,7 @@ func TestCreateChooserOptions(t *testing.T) {
 	for _, it := range m.create.items {
 		labels = append(labels, it.label)
 	}
-	want := []string{"New session", "New window in 'work'", "Split pane in 'editor'"}
+	want := []string{"New session", "New window in 'work'", "Split pane in 'editor'", "New session from directory…"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("options = %v, want %v", labels, want)
 	}
@@ -1000,17 +1000,17 @@ func TestCreateChooserIncludesTemplates(t *testing.T) {
 	m, _ = press(m, "n")
 
 	items := m.create.items
-	last := items[len(items)-1]
-	if last.kind != createFromTemplate {
-		t.Fatalf("last item kind = %v, want createFromTemplate", last.kind)
+	if items[len(items)-2].kind != createFromTemplate || items[len(items)-1].kind != createFromDir {
+		t.Fatalf("last two items = %v/%v, want template/directory",
+			items[len(items)-2].kind, items[len(items)-1].kind)
 	}
-	// default stays on the contextual item, not the template entry
-	if m.create.cursor != len(items)-2 {
-		t.Fatalf("default cursor = %d, want %d", m.create.cursor, len(items)-2)
+	// default stays on the contextual item, not the template/directory entries
+	if m.create.cursor != len(items)-3 {
+		t.Fatalf("default cursor = %d, want %d", m.create.cursor, len(items)-3)
 	}
 
 	// pick the template entry -> picker appears
-	for m.create.cursor != len(items)-1 {
+	for m.create.cursor != len(items)-2 {
 		m, _ = press(m, "down")
 	}
 	m, _ = press(m, "enter")
@@ -1043,7 +1043,7 @@ func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
 	}
 	openPicker := func(m model) model {
 		m, _ = press(m, "n")
-		for m.create.cursor != len(m.create.items)-1 {
+		for m.create.cursor != len(m.create.items)-2 { // template entry (dir is last)
 			m, _ = press(m, "down")
 		}
 		m, _ = press(m, "enter")
@@ -1100,6 +1100,75 @@ func TestTemplateDeleteAndRenameInTUI(t *testing.T) {
 	_, cmd = press(m, "enter")
 	if msg := cmd().(mutationMsg); msg.err == nil {
 		t.Fatal("conflicting rename must fail")
+	}
+}
+
+// --- directory picker ---
+
+func TestSessionNameForDir(t *testing.T) {
+	if got := sessionNameForDir("/a/b.c:d e"); got != "b_c_d_e" {
+		t.Fatalf("sessionNameForDir = %q", got)
+	}
+}
+
+func TestDirPickFiltersAndCreates(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m.dirList = func() ([]string, error) {
+		return []string{"/home/u/code/tmuxgo", "/home/u/code/other", "/tmp"}, nil
+	}
+	m, _ = press(m, "n")
+	last := m.create.items[len(m.create.items)-1]
+	if last.kind != createFromDir {
+		t.Fatalf("last chooser item = %+v, want createFromDir", last)
+	}
+	for m.create.cursor != len(m.create.items)-1 {
+		m, _ = press(m, "down")
+	}
+	m, _ = press(m, "enter")
+	if m.mode != modeDirPick {
+		t.Fatalf("mode = %v, want dir picker", m.mode)
+	}
+
+	m = typeText(m, "tmux")
+	if !reflect.DeepEqual(m.dirPick.filtered, []string{"/home/u/code/tmuxgo"}) {
+		t.Fatalf("filtered = %v", m.dirPick.filtered)
+	}
+
+	// open: creates the session named after the basename, then attaches
+	m, cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("open returned no command")
+	}
+	msg, ok := cmd().(dirSessionMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("dirSessionMsg = %#v", msg)
+	}
+	if msg.name != "tmuxgo" || msg.id != "$fake" {
+		t.Fatalf("dirSessionMsg = %+v", msg)
+	}
+	if !reflect.DeepEqual(fb.newSessions, []string{"tmuxgo"}) {
+		t.Fatalf("newSessions = %v", fb.newSessions)
+	}
+	_, attachCmd := m.Update(msg)
+	if attachCmd == nil {
+		t.Fatal("no attach command after create")
+	}
+}
+
+func TestDirPickAttachesExisting(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m.dirList = func() ([]string, error) { return []string{"/x/work"}, nil }
+	m, _ = press(m, "n")
+	for m.create.cursor != len(m.create.items)-1 {
+		m, _ = press(m, "down")
+	}
+	m, _ = press(m, "enter")
+	m, cmd := press(m, "enter") // session "work" already exists ($1)
+	if cmd == nil {
+		t.Fatal("no attach command for existing session")
+	}
+	if len(fb.newSessions) != 0 {
+		t.Fatalf("must not create a duplicate, got %v", fb.newSessions)
 	}
 }
 

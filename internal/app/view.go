@@ -45,6 +45,8 @@ func (m model) render() string {
 		body = m.renderConfirm(w, bodyH)
 	case modeMove:
 		body = m.renderMove(w, bodyH)
+	case modeDirPick:
+		body = m.renderDirPick(w, bodyH)
 	case modeSettings:
 		body = m.renderSettings(w, bodyH)
 	default:
@@ -91,6 +93,8 @@ func (m model) renderFooter(w int) string {
 		}
 	case modeConfirm:
 		s = "y confirm · n cancel"
+	case modeDirPick:
+		s = "type to filter · ↑/↓ choose · enter open · esc cancel"
 	case modeHelp:
 		s = "any key to close"
 	case modeSettings:
@@ -124,7 +128,7 @@ func (m model) defaultFooterHints() string {
 }
 
 func (m model) renderPromptOrStatus(w int) string {
-	if m.mode == modeFilter || m.mode == modeInput {
+	if m.mode == modeFilter || m.mode == modeInput || m.mode == modeDirPick {
 		return trunc(m.input.View(), w)
 	}
 	if m.status == "" {
@@ -376,6 +380,37 @@ func (m model) renderMove(w, bodyH int) string {
 	}
 	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m model) renderDirPick(w, bodyH int) string {
+	st := m.dirPick
+	if st == nil {
+		return ""
+	}
+	title := m.sty.title().Render("new session from directory")
+	if len(st.filtered) == 0 {
+		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
+			lipgloss.JoinVertical(lipgloss.Left, title, "", m.sty.meta().Render("no matches")))
+	}
+	vis := bodyH - 2
+	if vis < 1 {
+		vis = 1
+	}
+	if st.cursor < st.offset {
+		st.offset = st.cursor
+	}
+	if st.cursor >= st.offset+vis {
+		st.offset = st.cursor - vis + 1
+	}
+	end := st.offset + vis
+	if end > len(st.filtered) {
+		end = len(st.filtered)
+	}
+	lines := []string{title, ""}
+	for i := st.offset; i < end; i++ {
+		lines = append(lines, m.pickLine(trunc(st.filtered[i], w-4), i == st.cursor))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // pickLine renders one chooser/picker entry.

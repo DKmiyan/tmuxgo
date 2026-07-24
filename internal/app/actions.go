@@ -15,6 +15,7 @@ const (
 	createWindow
 	createSplit
 	createFromTemplate
+	createFromDir
 )
 
 type createItem struct {
@@ -57,6 +58,7 @@ func (m model) startCreate() (tea.Model, tea.Cmd) {
 			items = append(items, createItem{label: "New session from template…", kind: createFromTemplate})
 		}
 	}
+	items = append(items, createItem{label: "New session from directory…", kind: createFromDir})
 	m.create = &createState{items: items, cursor: def}
 	m.mode = modeCreate
 	return m, nil
