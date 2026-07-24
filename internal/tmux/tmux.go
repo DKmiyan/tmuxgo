@@ -175,6 +175,11 @@ func (t *Tmux) MovePane(paneID, windowID string) error {
 	return t.run("move-pane", "-s", paneID, "-t", windowID)
 }
 
+// BreakPane moves a pane into a brand-new window in its session.
+func (t *Tmux) BreakPane(paneID string) error {
+	return t.run("break-pane", "-s", paneID)
+}
+
 // KillSession kills a session with everything in it.
 func (t *Tmux) KillSession(id string) error {
 	return t.run("kill-session", "-t", id)

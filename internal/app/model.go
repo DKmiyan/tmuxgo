@@ -35,6 +35,7 @@ const (
 	inputRenameSession
 	inputRenameWindow
 	inputRenameTemplate
+	inputMoveWindowNewSession
 )
 
 const refreshInterval = 2 * time.Second

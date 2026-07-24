@@ -93,6 +93,14 @@ func (m model) startRename() (tea.Model, tea.Cmd) {
 
 // --- move ---
 
+type moveNewKind int
+
+const (
+	newNone moveNewKind = iota
+	newWindowForPane    // first picker item breaks the pane into a new window
+	newSessionForWindow // first picker item creates a session for the window
+)
+
 type moveState struct {
 	title      string
 	labels     []string
@@ -102,6 +110,7 @@ type moveState struct {
 	isWindow   bool // moving a window between sessions; false = pane between windows
 	isTemplate bool // picking a session template to instantiate
 	isSocket   bool // picking a tmux server socket to switch to
+	newKind    moveNewKind
 }
 
 func (m model) startMove() (tea.Model, tea.Cmd) {
@@ -118,7 +127,10 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 			title:    fmt.Sprintf("Move window '%s' to session:", r.window.Name),
 			sourceID: r.window.ID,
 			isWindow: true,
+			newKind:  newSessionForWindow,
 		}
+		st.labels = append(st.labels, "+ New session")
+		st.targets = append(st.targets, "")
 		for i := range m.tree {
 			s := &m.tree[i]
 			if s.ID == r.session.ID {
@@ -127,17 +139,16 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 			st.labels = append(st.labels, fmt.Sprintf("%s (%s)", s.Name, plural(len(s.Windows), "window")))
 			st.targets = append(st.targets, s.ID)
 		}
-		if len(st.targets) == 0 {
-			m.setStatus("no other session to move to", true)
-			return m, nil
-		}
 		m.move = st
 		m.mode = modeMove
 	case rowPane:
 		st := &moveState{
 			title:    fmt.Sprintf("Move pane '%s' to window:", r.pane.CurrentCommand),
 			sourceID: r.pane.ID,
+			newKind:  newWindowForPane,
 		}
+		st.labels = append(st.labels, fmt.Sprintf("+ New window in '%s'", r.session.Name))
+		st.targets = append(st.targets, "")
 		for i := range m.tree {
 			s := &m.tree[i]
 			for j := range s.Windows {
@@ -148,10 +159,6 @@ func (m model) startMove() (tea.Model, tea.Cmd) {
 				st.labels = append(st.labels, fmt.Sprintf("%s: %d %s", s.Name, w.Index, w.Name))
 				st.targets = append(st.targets, w.ID)
 			}
-		}
-		if len(st.targets) == 0 {
-			m.setStatus("no other window to move to", true)
-			return m, nil
 		}
 		m.move = st
 		m.mode = modeMove

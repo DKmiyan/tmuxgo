@@ -191,6 +191,36 @@ func TestMovePane(t *testing.T) {
 	}
 }
 
+func TestBreakPane(t *testing.T) {
+	b := newTestBackend(t)
+	if err := b.NewSession("alpha"); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	s := findSession(t, mustTree(t, b), "alpha")
+	if err := b.SplitPane(s.Windows[0].Panes[0].ID, ""); err != nil {
+		t.Fatalf("SplitPane: %v", err)
+	}
+	s = findSession(t, mustTree(t, b), "alpha")
+	paneID := s.Windows[0].Panes[0].ID
+	if err := b.BreakPane(paneID); err != nil {
+		t.Fatalf("BreakPane: %v", err)
+	}
+	s = findSession(t, mustTree(t, b), "alpha")
+	if len(s.Windows) != 2 {
+		t.Fatalf("windows after BreakPane = %d, want 2", len(s.Windows))
+	}
+	// the broken-out pane lives alone in the new window
+	found := false
+	for _, w := range s.Windows {
+		if len(w.Panes) == 1 && w.Panes[0].ID == paneID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pane %s not found alone in a new window", paneID)
+	}
+}
+
 func TestKillCascade(t *testing.T) {
 	b := newTestBackend(t)
 	if err := b.NewSession("alpha"); err != nil {

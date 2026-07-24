@@ -35,6 +35,7 @@ type fakeBackend struct {
 	renamedW     map[string]string
 	movedWindows [][2]string
 	movedPanes   [][2]string
+	brokenPanes  []string
 	killed       []string
 }
 
@@ -83,6 +84,11 @@ func (f *fakeBackend) MoveWindow(windowID, sessionID string) error {
 
 func (f *fakeBackend) MovePane(paneID, windowID string) error {
 	f.movedPanes = append(f.movedPanes, [2]string{paneID, windowID})
+	return nil
+}
+
+func (f *fakeBackend) BreakPane(paneID string) error {
+	f.brokenPanes = append(f.brokenPanes, paneID)
 	return nil
 }
 
@@ -563,10 +569,14 @@ func TestMoveWindowPicker(t *testing.T) {
 	if m.mode != modeMove {
 		t.Fatalf("mode = %v, want move", m.mode)
 	}
-	// only the other session is offered
-	if !reflect.DeepEqual(m.move.targets, []string{"$2"}) {
-		t.Fatalf("targets = %v, want [$2]", m.move.targets)
+	// the "+ New session" pseudo-item comes first, then other sessions
+	if !reflect.DeepEqual(m.move.targets, []string{"", "$2"}) {
+		t.Fatalf("targets = %v, want ['' $2]", m.move.targets)
 	}
+	if m.move.labels[0] != "+ New session" {
+		t.Fatalf("first label = %q", m.move.labels[0])
+	}
+	m, _ = press(m, "down") // select $2
 	m, cmd := press(m, "enter")
 	if msg := cmd().(mutationMsg); msg.err != nil {
 		t.Fatalf("move failed: %v", msg.err)
@@ -583,10 +593,14 @@ func TestMovePanePicker(t *testing.T) {
 	m, _ = press(m, "right")
 	m, _ = press(m, "down") // %1 in @1
 	m, _ = press(m, "m")
-	// every window except @1
-	if !reflect.DeepEqual(m.move.targets, []string{"@2", "@3"}) {
-		t.Fatalf("targets = %v, want [@2 @3]", m.move.targets)
+	// "+ New window in 'work'" first, then every window except @1
+	if !reflect.DeepEqual(m.move.targets, []string{"", "@2", "@3"}) {
+		t.Fatalf("targets = %v, want ['' @2 @3]", m.move.targets)
 	}
+	if m.move.labels[0] != "+ New window in 'work'" {
+		t.Fatalf("first label = %q", m.move.labels[0])
+	}
+	m, _ = press(m, "down")
 	m, _ = press(m, "down") // select @3
 	m, cmd := press(m, "enter")
 	if msg := cmd().(mutationMsg); msg.err != nil {
@@ -594,6 +608,73 @@ func TestMovePanePicker(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fb.movedPanes, [][2]string{{"%1", "@3"}}) {
 		t.Fatalf("movedPanes = %v, want [[%%1 @3]]", fb.movedPanes)
+	}
+}
+
+func TestMovePanePickerBreaksIntoNewWindow(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right")
+	m, _ = press(m, "down")
+	m, _ = press(m, "right")
+	m, _ = press(m, "down") // %1
+	m, _ = press(m, "m")
+	// first item is the pseudo-target; confirming it breaks the pane out
+	if m.move.newKind != newWindowForPane {
+		t.Fatalf("newKind = %v", m.move.newKind)
+	}
+	m, cmd := press(m, "enter") // cursor starts at 0
+	if cmd == nil {
+		t.Fatal("break-pane returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("break-pane failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.brokenPanes, []string{"%1"}) {
+		t.Fatalf("brokenPanes = %v, want [%%1]", fb.brokenPanes)
+	}
+}
+
+func TestMovePanePickerWorksWithoutOtherWindows(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	// %4 is the only pane of @3, the only window of personal
+	for m.rows[m.cursor].id != "$2" {
+		m, _ = press(m, "down")
+	}
+	m, _ = press(m, "right") // expand $2
+	m, _ = press(m, "down")  // @3
+	m, _ = press(m, "right") // expand @3
+	m, _ = press(m, "down")  // %4
+	m, _ = press(m, "m")
+	if m.mode != modeMove {
+		t.Fatalf("mode = %v, want move picker even with no other window", m.mode)
+	}
+	if m.move.labels[0] != "+ New window in 'personal'" {
+		t.Fatalf("first label = %q", m.move.labels[0])
+	}
+}
+
+func TestMoveWindowPickerCreatesSession(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right")
+	m, _ = press(m, "down") // @1
+	m, _ = press(m, "m")
+	if m.move.newKind != newSessionForWindow {
+		t.Fatalf("newKind = %v", m.move.newKind)
+	}
+	m, _ = press(m, "enter") // pick "+ New session"
+	if m.mode != modeInput {
+		t.Fatalf("mode = %v, want input for session name", m.mode)
+	}
+	m = typeText(m, "fresh")
+	m, cmd := press(m, "enter")
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("move-to-new-session failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.newSessions, []string{"fresh"}) {
+		t.Fatalf("newSessions = %v, want [fresh]", fb.newSessions)
+	}
+	if !reflect.DeepEqual(fb.movedWindows, [][2]string{{"@1", "$fake"}}) {
+		t.Fatalf("movedWindows = %v, want [[@1 $fake]]", fb.movedWindows)
 	}
 }
 

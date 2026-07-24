@@ -411,6 +411,14 @@ func (m model) handleInputKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.runMutation(func() error { return m.templates.Rename(target, value) }, "template renamed")
+		case inputMoveWindowNewSession:
+			return m, m.runMutation(func() error {
+				sessID, err := m.backend.NewSessionID(value, "")
+				if err != nil {
+					return err
+				}
+				return m.backend.MoveWindow(target, sessID)
+			}, "window moved to a new session")
 		}
 		return m, nil
 	}
@@ -520,6 +528,23 @@ func (m model) handleMoveKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		// pseudo-item first: create the missing home for the move
+		if st.newKind != newNone && st.cursor == 0 {
+			source := st.sourceID
+			m.mode = modeNormal
+			m.move = nil
+			switch st.newKind {
+			case newWindowForPane:
+				return m, m.runMutation(func() error { return m.backend.BreakPane(source) }, "pane moved to a new window")
+			case newSessionForWindow:
+				m.inputPurpose = inputMoveWindowNewSession
+				m.inputTarget = source
+				m.input.Reset()
+				m.input.Prompt = "new session name (empty = auto): "
+				m.mode = modeInput
+				return m, m.input.Focus()
+			}
+		}
 		target := st.targets[st.cursor]
 		source, isWindow, isTemplate, isSocket := st.sourceID, st.isWindow, st.isTemplate, st.isSocket
 		m.mode = modeNormal

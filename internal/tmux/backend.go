@@ -24,6 +24,9 @@ type Backend interface {
 	MoveWindow(windowID, sessionID string) error
 	MovePane(paneID, windowID string) error
 
+	// BreakPane moves a pane into a brand-new window in its session.
+	BreakPane(paneID string) error
+
 	KillSession(id string) error
 	KillWindow(id string) error
 	KillPane(id string) error
