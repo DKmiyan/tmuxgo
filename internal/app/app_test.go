@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DKmiyan/tmuxgo/internal/config"
 	"github.com/DKmiyan/tmuxgo/internal/i18n"
@@ -817,7 +818,7 @@ func click(x, y int) tea.MouseClickMsg {
 
 func TestMouseClickSelectsRow(t *testing.T) {
 	m, _ := newTestModel(80, 24)
-	m = apply(m, click(5, 2)) // second row ($2); header is line 0
+	m = apply(m, click(5, 3)) // second row ($2); header 0, panel border 1
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 1", m.cursor)
 	}
@@ -825,16 +826,16 @@ func TestMouseClickSelectsRow(t *testing.T) {
 
 func TestMouseMarkerTogglesExpand(t *testing.T) {
 	m, _ := newTestModel(80, 24)
-	m = apply(m, click(0, 1)) // marker of $1
+	m = apply(m, click(1, 2)) // marker of $1
 	assertIDs(t, m, []string{"$1", "@1", "@2", "$2"})
-	m = apply(m, click(0, 1)) // collapse again
+	m = apply(m, click(1, 2)) // collapse again
 	assertIDs(t, m, []string{"$1", "$2"})
 }
 
 func TestMouseDoubleClickAttaches(t *testing.T) {
 	m, _ := newTestModel(80, 24)
-	m = apply(m, click(5, 1))
-	_, cmd := m.Update(click(5, 1))
+	m = apply(m, click(5, 2))
+	_, cmd := m.Update(click(5, 2))
 	if cmd == nil {
 		t.Fatal("double-click returned no attach command")
 	}
@@ -875,13 +876,13 @@ func release(x, y int) tea.MouseReleaseMsg {
 
 func TestDragMoveWindow(t *testing.T) {
 	m, fb := newTestModel(80, 24)
-	m, _ = press(m, "right") // expand $1: rows $1(y1) @1(y2) @2(y3) $2(y4)
-	m = apply(m, click(5, 3))
-	m = apply(m, motion(5, 4))
+	m, _ = press(m, "right") // expand $1: rows $1(y2) @1(y3) @2(y4) $2(y5)
+	m = apply(m, click(5, 4))
+	m = apply(m, motion(5, 5))
 	if !strings.Contains(m.status, "release to move window 'logs' → session 'personal'") {
 		t.Fatalf("drag status = %q", m.status)
 	}
-	_, cmd := m.Update(release(5, 4))
+	_, cmd := m.Update(release(5, 5))
 	if cmd == nil {
 		t.Fatal("drop returned no command")
 	}
@@ -897,10 +898,10 @@ func TestDragMovePane(t *testing.T) {
 	m, fb := newTestModel(80, 24)
 	m, _ = press(m, "right") // expand $1
 	m, _ = press(m, "down")
-	m, _ = press(m, "right") // expand @1: rows $1 @1 %1(y3) %2(y4) @2(y5) $2
-	m = apply(m, click(5, 3))
-	m = apply(m, motion(5, 5))
-	_, cmd := m.Update(release(5, 5))
+	m, _ = press(m, "right") // expand @1: rows $1 @1 %1(y4) %2(y5) @2(y6) $2
+	m = apply(m, click(5, 4))
+	m = apply(m, motion(5, 6))
+	_, cmd := m.Update(release(5, 6))
 	if cmd == nil {
 		t.Fatal("drop returned no command")
 	}
@@ -915,9 +916,9 @@ func TestDragMovePane(t *testing.T) {
 func TestDragInvalidTargetIsNoop(t *testing.T) {
 	m, fb := newTestModel(80, 24)
 	m, _ = press(m, "right")
-	m = apply(m, click(5, 3))  // @2
-	m = apply(m, motion(5, 2)) // over @1 (window: invalid drop)
-	nm, cmd := m.Update(release(5, 2))
+	m = apply(m, click(5, 4))  // @2
+	m = apply(m, motion(5, 3)) // over @1 (window: invalid drop)
+	nm, cmd := m.Update(release(5, 3))
 	m = nm.(model)
 	if cmd != nil {
 		t.Fatal("invalid drop must return no command")
@@ -1535,69 +1536,98 @@ func TestChineseFooterAndDialogs(t *testing.T) {
 	}
 }
 
-// --- clickable footer ---
+// --- clickable footer button bar ---
 
-func TestFooterSegmentsLayout(t *testing.T) {
+// barButtonY returns the absolute y of the middle (label) row of button
+// band r in the footer.
+func barButtonY(m model, r int) int {
+	return m.height - m.footerHeight() + r*3 + 1
+}
+
+func TestFooterButtonsLayout(t *testing.T) {
 	m, _ := newTestModel(100, 24)
-	segs := m.footerSegments(100)
-	if len(segs) != 9 {
-		t.Fatalf("segments = %d, want 9", len(segs))
+	btns := m.footerButtons(100)
+	if len(btns) != 9 {
+		t.Fatalf("buttons = %d, want 9", len(btns))
 	}
-	if segs[0].start != 0 {
-		t.Fatalf("first segment starts at %d", segs[0].start)
+	if btns[0].start != 0 || btns[0].row != 0 {
+		t.Fatalf("first button at start %d row %d", btns[0].start, btns[0].row)
 	}
-	for i := 1; i < len(segs); i++ {
-		if segs[i].start != segs[i-1].end+3 {
-			t.Fatalf("segment %d not separated: prev end %d, start %d", i, segs[i-1].end, segs[i].start)
+	for i := 1; i < len(btns); i++ {
+		if btns[i].row != btns[i-1].row {
+			if btns[i].start != 0 {
+				t.Fatalf("button %d wraps but does not start at 0", i)
+			}
+			continue
+		}
+		if btns[i].start != btns[i-1].end+1 {
+			t.Fatalf("button %d not spaced: prev end %d, start %d", i, btns[i-1].end, btns[i].start)
 		}
 	}
-	if segs[len(segs)-1].end > 100 {
-		t.Fatal("segments overflow width")
+	for _, b := range btns {
+		if b.end > 100 {
+			t.Fatalf("button %q overflows width (end %d)", b.label, b.end)
+		}
 	}
-	// narrower width drops trailing segments
-	narrow := m.footerSegments(30)
-	if len(narrow) == 0 || len(narrow) >= 9 {
-		t.Fatalf("narrow segments = %d, want some but not all", len(narrow))
+	// a narrow width wraps buttons to more bands but never drops them
+	narrow := m.footerButtons(30)
+	if len(narrow) != 9 {
+		t.Fatalf("narrow buttons = %d, want all 9 wrapped", len(narrow))
 	}
-	if narrow[len(narrow)-1].end > 30 {
-		t.Fatal("narrow segments overflow")
+	rows := 1
+	for _, b := range narrow {
+		if b.end > 30 {
+			t.Fatalf("button %q overflows width (end %d)", b.label, b.end)
+		}
+		if b.row+1 > rows {
+			rows = b.row + 1
+		}
 	}
-	// an active filter shifts segments right
+	if rows < 2 {
+		t.Fatal("narrow width must wrap to multiple bands")
+	}
+	// an active filter shifts the first button right
 	m.filter = "wo"
-	if withFilter := m.footerSegments(100); withFilter[0].start == 0 {
-		t.Fatal("filter prefix must shift segments right")
+	if withFilter := m.footerButtons(100); withFilter[0].start == 0 {
+		t.Fatal("filter prefix must shift buttons right")
 	}
 }
 
 func TestFooterClickDispatches(t *testing.T) {
 	m, _ := newTestModel(100, 24)
-	segs := m.footerSegments(100)
+	btns := m.footerButtons(100)
 	help := -1
-	for i, s := range segs {
-		if s.act == actHelp {
+	for i, b := range btns {
+		if b.act == actHelp {
 			help = i
 		}
 	}
 	if help < 0 {
-		t.Fatal("no help segment")
+		t.Fatal("no help button")
 	}
-	m = apply(m, click(segs[help].start, 23))
+	m = apply(m, click(btns[help].start+2, barButtonY(m, btns[help].row)))
 	if m.mode != modeHelp {
 		t.Fatalf("mode = %v, want help after footer click", m.mode)
 	}
-	// clicking a separator does nothing
+	// clicking the top border row of a button box also dispatches
 	m, _ = newTestModel(100, 24)
-	m = apply(m, click(segs[0].end+1, 23))
+	m = apply(m, click(btns[help].start+2, barButtonY(m, btns[help].row)-1))
+	if m.mode != modeHelp {
+		t.Fatalf("mode = %v, want help after box-border click", m.mode)
+	}
+	// clicking the gap between buttons does nothing
+	m, _ = newTestModel(100, 24)
+	m = apply(m, click(btns[0].end, barButtonY(m, 0)))
 	if m.mode != modeNormal {
-		t.Fatalf("separator click changed mode to %v", m.mode)
+		t.Fatalf("gap click changed mode to %v", m.mode)
 	}
-	// the quit segment returns tea.Quit
+	// the quit button returns tea.Quit
 	m, _ = newTestModel(100, 24)
-	quit := segs[len(segs)-1]
+	quit := btns[len(btns)-1]
 	if quit.act != actQuit {
-		t.Fatalf("last segment = %v, want quit", quit.act)
+		t.Fatalf("last button = %v, want quit", quit.act)
 	}
-	_, cmd := m.handleMouseClick(tea.Mouse(click(quit.start, 23)))
+	_, cmd := m.handleMouseClick(tea.Mouse(click(quit.start+2, barButtonY(m, quit.row))))
 	if cmd == nil {
 		t.Fatal("quit click returned no command")
 	}
@@ -1608,15 +1638,15 @@ func TestFooterClickDispatches(t *testing.T) {
 
 func TestFooterHoverHighlights(t *testing.T) {
 	m, _ := newTestModel(80, 24)
-	segs := m.footerSegments(80)
-	m = apply(m, tea.MouseMotionMsg(tea.Mouse{X: segs[1].start, Y: 23, Button: tea.MouseNone}))
+	btns := m.footerButtons(80)
+	m = apply(m, tea.MouseMotionMsg(tea.Mouse{X: btns[1].start + 2, Y: barButtonY(m, btns[1].row), Button: tea.MouseNone}))
 	if m.hoverFooter != 1 {
 		t.Fatalf("hoverFooter = %d, want 1", m.hoverFooter)
 	}
 	if out := m.View().Content; !strings.Contains(out, "rename") {
 		t.Fatal("footer missing rename label")
 	}
-	// moving off the footer clears the hover
+	// moving off the bar clears the hover
 	m = apply(m, tea.MouseMotionMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseNone}))
 	if m.hoverFooter != -1 {
 		t.Fatalf("hoverFooter = %d, want -1", m.hoverFooter)
@@ -1626,8 +1656,317 @@ func TestFooterHoverHighlights(t *testing.T) {
 func TestFooterButtonMotionIsNotHover(t *testing.T) {
 	// a left-button motion is a potential drag, never a footer hover
 	m, _ := newTestModel(80, 24)
-	m = apply(m, motion(3, 23))
+	btns := m.footerButtons(80)
+	m = apply(m, motion(btns[1].start+2, barButtonY(m, btns[1].row)))
 	if m.hoverFooter != -1 {
 		t.Fatal("button motion must not set hover")
+	}
+}
+
+// --- dialog mouse support ---
+
+func hover(x, y int) tea.MouseMotionMsg {
+	return tea.MouseMotionMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseNone})
+}
+
+func rightClick(x, y int) tea.MouseClickMsg {
+	return tea.MouseClickMsg(tea.Mouse{X: x, Y: y, Button: tea.MouseRight})
+}
+
+// TestCenteredBoxGeometryMatchesRender pins the hit-test geometry to what
+// lipgloss.Place actually draws: the selected settings row's ▸ marker must
+// land exactly where centeredBoxGeometry predicts.
+func TestCenteredBoxGeometryMatchesRender(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.mode = modeSettings
+	w, bodyH := m.renderSize()
+	g := centeredBoxGeometry(w, bodyH, m.settingsLines(w))
+
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	foundY, foundX := -1, -1
+	for i, l := range lines {
+		if j := strings.Index(l, "▸"); j >= 0 {
+			foundY, foundX = i, lipgloss.Width(l[:j])
+			break
+		}
+	}
+	if wantY := g.top + 1 + 2; foundY != wantY { // border, title, blank
+		t.Fatalf("selected row at y=%d, geometry predicted %d", foundY, wantY)
+	}
+	if wantX := g.left + 3; foundX != wantX { // border + padding
+		t.Fatalf("selected marker at x=%d, geometry predicted %d", foundX, wantX)
+	}
+}
+
+func TestSettingsMouseClickChangesValue(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.mode = modeSettings
+	w, bodyH := m.renderSize()
+	g := centeredBoxGeometry(w, bodyH, m.settingsLines(w))
+	rowY := func(i int) int { return g.top + 1 + 2 + i }
+	x := g.left + 5
+
+	// left-click the language row: selects it and cycles forward (Enter)
+	before := m.cfg.Language
+	m = apply(m, click(x, rowY(1)))
+	if m.settingsCursor != 1 {
+		t.Fatalf("settingsCursor = %d, want 1", m.settingsCursor)
+	}
+	if m.cfg.Language == before {
+		t.Fatal("click did not change the language")
+	}
+	// right-click cycles back (Left)
+	m = apply(m, rightClick(x, rowY(1)))
+	if m.cfg.Language != before {
+		t.Fatalf("right-click did not cycle back: %q, want %q", m.cfg.Language, before)
+	}
+	// boolean rows toggle on click
+	prev := m.cfg.PreviewDefault
+	m = apply(m, click(x, rowY(2)))
+	if m.cfg.PreviewDefault == prev {
+		t.Fatal("click did not toggle the preview default")
+	}
+}
+
+func TestSettingsMouseHoverAndWheel(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.mode = modeSettings
+	w, bodyH := m.renderSize()
+	g := centeredBoxGeometry(w, bodyH, m.settingsLines(w))
+
+	m = apply(m, hover(g.left+5, g.top+1+2+3)) // hover the mouse row
+	if m.settingsCursor != 3 {
+		t.Fatalf("hover settingsCursor = %d, want 3", m.settingsCursor)
+	}
+	m = apply(m, tea.MouseWheelMsg(tea.Mouse{X: 5, Y: 5, Button: tea.MouseWheelUp}))
+	if m.settingsCursor != 2 {
+		t.Fatalf("wheel settingsCursor = %d, want 2", m.settingsCursor)
+	}
+}
+
+func TestSettingsMouseClickOutsideSavesAndCloses(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m.mode = modeSettings
+	m = apply(m, click(0, 0)) // header, outside the box
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal after outside click", m.mode)
+	}
+}
+
+func TestCreateMouseClickChoosesItem(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1
+	m, _ = press(m, "n")     // items: session, window, split (cursor on split)
+	w, bodyH := m.renderSize()
+	g := centeredBoxGeometry(w, bodyH, m.createLines(w))
+
+	// hover preselects without confirming
+	m = apply(m, hover(g.left+4, g.top+1+2+0))
+	if m.create.cursor != 0 {
+		t.Fatalf("hover create.cursor = %d, want 0", m.create.cursor)
+	}
+	// click the split item: same as Enter on it
+	_, cmd := m.Update(click(g.left+4, g.top+1+2+2))
+	if cmd == nil {
+		t.Fatal("click on split item returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("split failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.splits, []string{"%1"}) {
+		t.Fatalf("splits = %v, want [%%1]", fb.splits)
+	}
+}
+
+func TestCreateMouseClickOutsideCancels(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "n")
+	m = apply(m, click(0, 0))
+	if m.mode != modeNormal || m.create != nil {
+		t.Fatalf("mode = %v create = %v, want cancelled", m.mode, m.create)
+	}
+}
+
+func TestMoveMouseClickChoosesTarget(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1
+	m, _ = press(m, "m")     // move @1: [0] = new session, [1] = personal
+	w, bodyH := m.renderSize()
+	g := centeredBoxGeometry(w, bodyH, m.moveLines(w))
+
+	_, cmd := m.Update(click(g.left+4, g.top+1+2+1)) // "personal"
+	if cmd == nil {
+		t.Fatal("click on target returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("move failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.movedWindows, [][2]string{{"@1", "$2"}}) {
+		t.Fatalf("movedWindows = %v, want [[@1 $2]]", fb.movedWindows)
+	}
+}
+
+func TestConfirmMouseButtons(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "d") // delete session $1
+	w, bodyH := m.renderSize()
+	lines := m.confirmLines(w)
+	g := centeredBoxGeometry(w, bodyH, lines)
+	hintY := g.top + 1 + len(lines) - 1
+	hint := m.tr(i18n.ConfirmHint)
+	nCol := g.left + 3 + lipgloss.Width(hint[:strings.Index(hint, "[n/esc]")]) + 1
+
+	// [y] confirm zone executes the kill
+	_, cmd := m.Update(click(g.left+3+1, hintY))
+	if cmd == nil {
+		t.Fatal("click on [y] returned no command")
+	}
+	if msg := cmd().(mutationMsg); msg.err != nil {
+		t.Fatalf("kill failed: %v", msg.err)
+	}
+	if !reflect.DeepEqual(fb.killed, []string{"$1"}) {
+		t.Fatalf("killed = %v, want [$1]", fb.killed)
+	}
+
+	// [n/esc] cancel zone aborts
+	m, _ = press(m, "d")
+	m = apply(m, click(nCol, hintY))
+	if m.mode != modeNormal || m.confirm != nil {
+		t.Fatalf("mode = %v, want cancelled", m.mode)
+	}
+	if m.status != m.tr(i18n.Cancelled) {
+		t.Fatalf("status = %q, want cancelled", m.status)
+	}
+	if len(fb.killed) != 1 {
+		t.Fatalf("killed = %v, cancel must not kill", fb.killed)
+	}
+
+	// a click outside the box also cancels (never confirms)
+	m, _ = press(m, "d")
+	m = apply(m, click(0, 0))
+	if m.mode != modeNormal || m.confirm != nil {
+		t.Fatalf("mode = %v, want cancelled on outside click", m.mode)
+	}
+	if len(fb.killed) != 1 {
+		t.Fatalf("killed = %v, outside click must not kill", fb.killed)
+	}
+}
+
+func TestHelpMouseClickCloses(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "?")
+	if m.mode != modeHelp {
+		t.Fatalf("mode = %v, want help", m.mode)
+	}
+	m = apply(m, click(40, 12))
+	if m.mode != modeNormal {
+		t.Fatalf("mode = %v, want normal after click", m.mode)
+	}
+}
+
+func TestDirPickMouseCompleteAndAccept(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"alpha", "beta"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "n")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up") // "New session"
+	}
+	m, _ = press(m, "enter")
+	if m.mode != modeDirPick {
+		t.Fatalf("mode = %v, want dir step", m.mode)
+	}
+	m.input.SetValue(root + "/")
+	m.refreshDirCompletions() // matches: alpha (y=3), beta (y=4)
+
+	// hover preselects
+	m = apply(m, hover(2, 4))
+	if m.dirPick.cursor != 1 {
+		t.Fatalf("hover dirPick.cursor = %d, want 1", m.dirPick.cursor)
+	}
+	// single click completes into the directory (Tab)
+	m = apply(m, click(2, 4))
+	if m.input.Value() != root+"/beta/" {
+		t.Fatalf("click complete = %q, want %q", m.input.Value(), root+"/beta/")
+	}
+	// a quick second click on the same row accepts the directory (Enter)
+	m = apply(m, click(2, 4))
+	if m.mode != modeInput {
+		t.Fatalf("double-click accept: mode = %v, want name step", m.mode)
+	}
+	if m.input.Value() != "beta" {
+		t.Fatalf("name prefill = %q, want beta", m.input.Value())
+	}
+	if m.pendingDir != root+"/beta/" {
+		t.Fatalf("pendingDir = %q, want %q", m.pendingDir, root+"/beta/")
+	}
+}
+
+// --- preview: window-level sections and sizing ---
+
+func TestPreviewWClamp(t *testing.T) {
+	if got := previewW(104); got != 41 {
+		t.Fatalf("previewW(104) = %d, want 41", got)
+	}
+	if got := previewW(200); got != 56 {
+		t.Fatalf("previewW(200) = %d, want 56 (capped)", got)
+	}
+	if got := previewW(40); got != 20 {
+		t.Fatalf("previewW(40) = %d, want 20 (floor)", got)
+	}
+}
+
+func TestPreviewMultiPaneSections(t *testing.T) {
+	m, _ := newTestModel(120, 24)
+	m.previewOn = true
+	m, _ = press(m, "right") // expand $1
+	m, _ = press(m, "down")  // @1 (two panes)
+	if win := m.previewWindow(); win == nil || win.ID != "@1" {
+		t.Fatalf("previewWindow = %v, want @1", m.previewWindow())
+	}
+	// deliver both panes' content via the fetch command
+	m, cmd := press(m, "p") // toggles off
+	m, cmd = press(m, "p")  // and back on, returning a fetch cmd
+	if cmd == nil {
+		t.Fatal("no fetch command")
+	}
+	m = apply(m, cmd())
+	if m.previewCache["%1"] == "" || m.previewCache["%2"] == "" {
+		t.Fatalf("cache missing panes: %v", m.previewCache)
+	}
+	// give the panes distinguishable content
+	m.previewCache["%1"] = "vim-content"
+	m.previewCache["%2"] = "bash-content"
+	got := ansi.Strip(m.View().Content)
+	if !strings.Contains(got, "vim-content") || !strings.Contains(got, "bash-content") {
+		t.Fatalf("multi-pane preview missing content:\n%s", got)
+	}
+	if !strings.Contains(got, "─") || !strings.Contains(got, "%2 bash") {
+		t.Fatalf("preview missing labeled divider:\n%s", got)
+	}
+	if !strings.Contains(got, "preview @1") {
+		t.Fatalf("preview title should be the window:\n%s", got)
+	}
+}
+
+func TestPreviewSinglePaneNoDivider(t *testing.T) {
+	m, _ := newTestModel(120, 24)
+	m.previewOn = true
+	// session $2 has one window with one pane
+	m, _ = press(m, "down") // $2
+	m.previewCache["%4"] = "mutt-content"
+	got := ansi.Strip(m.View().Content)
+	if !strings.Contains(got, "mutt-content") {
+		t.Fatalf("single-pane preview missing content:\n%s", got)
+	}
+	if strings.Contains(got, "%4 mutt ─") {
+		t.Fatal("single pane must not render a divider")
 	}
 }

@@ -109,6 +109,10 @@ type model struct {
 	lastClickRow int
 	lastClickAt  time.Time
 	hoverFooter  int
+	// dir-pick double-click tracking: a quick second click on the same
+	// completion row accepts the typed directory (-1 = no pending click)
+	lastDirClickIdx int
+	lastDirClickAt  time.Time
 
 	// drag & drop move: dragSource is the row index where the current
 	// drag started (-1 = no drag), dragTarget is the hovered drop row
@@ -124,23 +128,24 @@ func newModel(b tmux.Backend, dark, popup bool) model {
 	in.CharLimit = 120
 	cfg := config.Default()
 	return model{
-		backend:      b,
-		sty:          newStyles(dark),
-		expanded:     make(map[string]bool),
-		previewCache: make(map[string]string),
-		input:        in,
-		popup:        popup,
-		cfg:          cfg,
-		detectedDark: dark,
-		lang:         i18n.Resolve(cfg.Language, os.Getenv),
-		keyActions:   buildKeyActions(cfg),
-		mouseEnabled: cfg.Mouse,
-		lastClickRow: -1,
-		hoverFooter:  -1,
-		dragSource:   -1,
-		dragTarget:   -1,
-		width:        80,
-		height:       24,
+		backend:         b,
+		sty:             newStyles(dark),
+		expanded:        make(map[string]bool),
+		previewCache:    make(map[string]string),
+		input:           in,
+		popup:           popup,
+		cfg:             cfg,
+		detectedDark:    dark,
+		lang:            i18n.Resolve(cfg.Language, os.Getenv),
+		keyActions:      buildKeyActions(cfg),
+		mouseEnabled:    cfg.Mouse,
+		lastClickRow:    -1,
+		lastDirClickIdx: -1,
+		hoverFooter:     -1,
+		dragSource:      -1,
+		dragTarget:      -1,
+		width:           80,
+		height:          24,
 	}
 }
 
@@ -274,9 +279,10 @@ func (m model) focusCurrent() tea.Msg {
 	return focusMsg{id: id}
 }
 
+// previewMsg carries freshly captured content for the preview window's
+// panes (keyed by pane ID).
 type previewMsg struct {
-	id      string
-	content string
+	panes map[string]string
 }
 
 // --- commands ---
@@ -360,7 +366,7 @@ func (m *model) moveCursor(delta int) {
 }
 
 func (m *model) ensureVisible() {
-	vis := m.bodyHeight()
+	vis := m.listHeight()
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}

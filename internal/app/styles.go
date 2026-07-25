@@ -77,6 +77,27 @@ func (s *styles) dangerBox() lipgloss.Style {
 		Padding(0, 2)
 }
 
+// frame is the shared panel frame (main list, footer bar): border only, no
+// padding, so the content gets the full inner width.
+func (s *styles) frame() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(s.accent)
+}
+
+// button renders one footer hint's label in the theme accent: no
+// background fill, so the text stays readable on the terminal's own
+// background. Only the hover state fills.
+func (s *styles) button() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(s.accent)
+}
+
+// buttonHover renders the hovered footer button's interior (shadow
+// switches to the theme accent).
+func (s *styles) buttonHover() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(s.selFg).Background(s.accent).Bold(true)
+}
+
 // trunc clips s to at most w display cells, ANSI-aware.
 func trunc(s string, w int) string {
 	if w <= 0 {

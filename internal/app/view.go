@@ -24,17 +24,10 @@ func (m model) View() tea.View {
 }
 
 func (m model) render() string {
-	w := m.width
-	if w < 20 {
-		w = 20
-	}
+	w, bodyH := m.renderSize()
 	header := m.renderHeader(w)
 	footer := m.renderFooter(w)
 	middle := m.renderPromptOrStatus(w)
-	bodyH := m.height - 3
-	if bodyH < 1 {
-		bodyH = 1
-	}
 
 	var body string
 	switch m.mode {
@@ -56,13 +49,48 @@ func (m model) render() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, middle, footer)
 }
 
-// bodyHeight is the number of rows available for the tree area.
+// renderSize returns the render width (clamped to a sane minimum) and the
+// body height; rendering and mouse hit-testing share it.
+func (m model) renderSize() (w, bodyH int) {
+	return m.renderW(), m.bodyHeight()
+}
+
+// renderW is the clamped render width.
+func (m model) renderW() int {
+	w := m.width
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+// bodyHeight is the number of rows available for the body area (tree or
+// dialog), between the header and the status line.
 func (m model) bodyHeight() int {
-	h := m.height - 3
+	h := m.height - 2 - m.footerHeight()
 	if h < 1 {
 		return 1
 	}
 	return h
+}
+
+// listHeight is the number of tree rows visible inside the list panel.
+func (m model) listHeight() int {
+	h := m.bodyHeight() - 2
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+// listW is the outer width of the list panel: the full width, minus the
+// preview column when it shows.
+func (m model) listW() int {
+	w := m.renderW()
+	if m.showPreview() {
+		return w - previewW(w)
+	}
+	return w
 }
 
 // --- header / footer / status ---
@@ -101,24 +129,27 @@ func (m model) renderFooter(w int) string {
 	case modeSettings:
 		s = m.tr(i18n.FooterSettings)
 	default:
-		return m.renderFooterHints(w)
+		return m.renderFooterBar(w)
 	}
 	return trunc(m.sty.meta().Render(s), w)
 }
 
-// footerSegment is one clickable normal-mode hint with its cell range
-// [start, end) in the footer line.
-type footerSegment struct {
+// footerButton is one clickable normal-mode hint button: a mini-box
+// spanning cell range [start, end) across three text rows (top border,
+// label, bottom border) in footer row band `row`.
+type footerButton struct {
 	label      string // e.g. "n new"
 	act        action
+	row        int
 	start, end int
 }
 
-// footerSegments lays out the normal-mode hints left to right, dropping
-// trailing segments that do not fit width w. An active filter prefix
-// shifts the segments right. The layout is pure: render and mouse
-// hit-testing use the same result.
-func (m model) footerSegments(w int) []footerSegment {
+// footerButtons lays out the normal-mode hint buttons left to right across
+// width w, wrapping to a new band when the next button does not fit —
+// buttons wrap, they are never dropped. An active filter prefix occupies
+// the start of the first band's middle row. The layout is pure: render and
+// mouse hit-testing use the same result.
+func (m model) footerButtons(w int) []footerButton {
 	actions := []struct {
 		name  string
 		label i18n.ID
@@ -134,63 +165,113 @@ func (m model) footerSegments(w int) []footerSegment {
 		{"settings", i18n.ActSettings, actSettings},
 		{"quit", i18n.ActQuit, actQuit},
 	}
-	x := 0
+	x, row := 0, 0
 	if m.filter != "" {
-		x = lipgloss.Width(m.tr(i18n.FilterActive, m.filter, ""))
+		x = lipgloss.Width(m.tr(i18n.FilterActive, m.filter, "")) + 1
 	}
-	segs := make([]footerSegment, 0, len(actions))
-	for i, a := range actions {
+	btns := make([]footerButton, 0, len(actions))
+	for _, a := range actions {
 		k := "?"
 		if keys := m.cfg.Keys[a.name]; len(keys) > 0 {
 			k = keys[0]
 		}
 		label := k + " " + m.tr(a.label)
-		segW := lipgloss.Width(label)
-		need := segW
-		if i > 0 {
-			need += 3 // " · " separator
+		bw := lipgloss.Width(label) + 2 // mini-box hugs the text: just the borders
+		if x > 0 && x+bw > w {
+			row++
+			x = 0
 		}
-		if x+need > w {
-			break
-		}
-		if i > 0 {
-			x += 3
-		}
-		segs = append(segs, footerSegment{label: label, act: a.act, start: x, end: x + segW})
-		x += segW
+		btns = append(btns, footerButton{label: label, act: a.act, row: row, start: x, end: x + bw})
+		x += bw + 1
 	}
-	return segs
+	return btns
 }
 
-// footerHit returns the index of the footer segment containing cell x, or
-// -1 when x is on a separator, the filter prefix, or empty space.
-func (m model) footerHit(x, w int) int {
-	for i, s := range m.footerSegments(w) {
-		if x >= s.start && x < s.end {
+// footerButtonRows is the number of button bands the footer needs at
+// width w.
+func (m model) footerButtonRows(w int) int {
+	btns := m.footerButtons(w)
+	return btns[len(btns)-1].row + 1
+}
+
+// footerHeight is the footer's height in rows: each button band takes
+// three rows (top border, label, bottom border); every other mode shows a
+// single hint line.
+func (m model) footerHeight() int {
+	if m.mode != modeNormal {
+		return 1
+	}
+	h := m.footerButtonRows(m.renderW()) * 3
+	if m.height > 0 && h > m.height-4 {
+		h = (m.height - 4) / 3 * 3
+		if h < 3 {
+			h = 3
+		}
+	}
+	return h
+}
+
+// footerButtonAt returns the index of the footer button at absolute screen
+// point (x, y), or -1 when the point is between buttons or outside the
+// footer. The whole mini-box (all three rows) is clickable.
+func (m model) footerButtonAt(x, y int) int {
+	if m.mode != modeNormal {
+		return -1
+	}
+	top := m.height - m.footerHeight()
+	if y < top || y >= m.height {
+		return -1
+	}
+	band := (y - top) / 3
+	for i, b := range m.footerButtons(m.renderW()) {
+		if b.row == band && x >= b.start && x < b.end {
 			return i
 		}
 	}
 	return -1
 }
 
-// renderFooterHints renders the normal-mode hints with the hovered segment
-// highlighted (mouse hover).
-func (m model) renderFooterHints(w int) string {
-	var b strings.Builder
-	if m.filter != "" {
-		b.WriteString(m.sty.meta().Render(m.tr(i18n.FilterActive, m.filter, "")))
-	}
-	for i, s := range m.footerSegments(w) {
-		if i > 0 {
-			b.WriteString(m.sty.meta().Render(" · "))
+// renderFooterBar renders the normal-mode hints as mini-boxed buttons (one
+// band of boxes per layout row); the hovered button's interior fills with
+// the theme accent.
+func (m model) renderFooterBar(w int) string {
+	btns := m.footerButtons(w)
+	n := m.footerButtonRows(w)
+	lines := make([]string, 0, n*3)
+	for band := 0; band < n; band++ {
+		var top, mid, bot string
+		if band == 0 && m.filter != "" {
+			mid = m.sty.meta().Render(m.tr(i18n.FilterActive, m.filter, ""))
 		}
-		if i == m.hoverFooter {
-			b.WriteString(lipgloss.NewStyle().Foreground(m.sty.accent).Bold(true).Render(s.label))
-		} else {
-			b.WriteString(m.sty.meta().Render(s.label))
+		for i, b := range btns {
+			if b.row != band {
+				continue
+			}
+			bw := b.end - b.start
+			border := m.sty.meta().Render("╭" + strings.Repeat("─", bw-2) + "╮")
+			top = overlayAt(top, b.start, border)
+			var boxMid string
+			if i == m.hoverFooter {
+				boxMid = m.sty.meta().Render("│") + m.sty.buttonHover().Render(b.label) + m.sty.meta().Render("│")
+			} else {
+				boxMid = m.sty.meta().Render("│") + m.sty.button().Render(b.label) + m.sty.meta().Render("│")
+			}
+			mid = overlayAt(mid, b.start, boxMid)
+			border = m.sty.meta().Render("╰" + strings.Repeat("─", bw-2) + "╯")
+			bot = overlayAt(bot, b.start, border)
 		}
+		lines = append(lines, trunc(top, w), trunc(mid, w), trunc(bot, w))
 	}
-	return trunc(b.String(), w)
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// overlayAt returns line with seg placed at cell x, padding the gap with
+// plain spaces (segments in one band never overlap).
+func overlayAt(line string, x int, seg string) string {
+	if pad := x - lipgloss.Width(line); pad > 0 {
+		line += strings.Repeat(" ", pad)
+	}
+	return line + seg
 }
 
 func (m model) renderPromptOrStatus(w int) string {
@@ -209,40 +290,37 @@ func (m model) renderPromptOrStatus(w int) string {
 // --- tree body ---
 
 func (m model) renderBody(w, bodyH int) string {
-	if !m.loaded {
-		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
-			m.sty.meta().Render(m.tr(i18n.Loading)))
-	}
-	if len(m.rows) == 0 {
-		hint := m.tr(i18n.NoSessions)
-		if m.filter != "" {
-			hint = m.tr(i18n.NoMatches, m.filter)
+	listW := m.listW()
+	if !m.loaded || len(m.rows) == 0 {
+		msg := m.tr(i18n.Loading)
+		if m.loaded {
+			msg = m.tr(i18n.NoSessions)
+			if m.filter != "" {
+				msg = m.tr(i18n.NoMatches, m.filter)
+			}
 		}
-		return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center,
-			m.sty.meta().Render(hint))
+		inner := lipgloss.Place(listW-2, m.listHeight(), lipgloss.Center, lipgloss.Center,
+			m.sty.meta().Render(msg))
+		return m.sty.frame().Width(listW).Render(inner)
 	}
 
-	listW := w
-	if m.showPreview() {
-		listW = w * 3 / 5
-	}
-
-	end := m.offset + bodyH
+	end := m.offset + m.listHeight()
 	if end > len(m.rows) {
 		end = len(m.rows)
 	}
-	lines := make([]string, 0, bodyH)
+	lines := make([]string, 0, m.listHeight())
 	for i := m.offset; i < end; i++ {
 		drop := false
 		if m.dragSource >= 0 && i == m.dragTarget {
 			_, _, drop = m.dropTarget(m.dragSource, i)
 		}
-		lines = append(lines, m.renderRow(m.rows[i], listW, i == m.cursor, drop))
+		lines = append(lines, m.renderRow(m.rows[i], listW-2, i == m.cursor, drop))
 	}
-	for len(lines) < bodyH {
+	for len(lines) < m.listHeight() {
 		lines = append(lines, "")
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	body := m.sty.frame().Width(listW).Height(bodyH).
+		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	if m.showPreview() {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderPreview(w-listW, bodyH))
 	}
@@ -386,7 +464,9 @@ var helpEntries = []struct {
 	{"quit", i18n.HelpQuit},
 }
 
-func (m model) renderSettings(w, bodyH int) string {
+// settingsLines builds the settings box content; rendering and mouse
+// hit-testing share it (setting i sits at line 2+i).
+func (m model) settingsLines(w int) []string {
 	values := []struct{ label, value string }{
 		{m.tr(i18n.SetTheme), m.cfg.Theme},
 		{m.tr(i18n.SetLanguage), m.cfg.Language},
@@ -401,7 +481,11 @@ func (m model) renderSettings(w, bodyH int) string {
 		m.sty.meta().Render(m.tr(i18n.SettingsHint)),
 		m.sty.meta().Render(m.tr(i18n.SettingsKeysIn)),
 		m.sty.meta().Render(trunc(m.cfgPath, w-12)))
-	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return lines
+}
+
+func (m model) renderSettings(w, bodyH int) string {
+	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, m.settingsLines(w)...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -421,41 +505,70 @@ func (m model) onOff(b bool) string {
 	return m.tr(i18n.Off)
 }
 
-func (m model) renderCreate(w, bodyH int) string {
+// createLines builds the create-menu box content (item i at line 2+i).
+func (m model) createLines(w int) []string {
 	c := m.create
 	if c == nil {
-		return ""
+		return nil
 	}
 	lines := []string{m.sty.title().Render(m.tr(i18n.CreateTitle)), ""}
 	for i, item := range c.items {
 		lines = append(lines, m.pickLine(trunc(item.label, w-12), i == c.cursor))
 	}
+	return lines
+}
+
+func (m model) renderCreate(w, bodyH int) string {
+	lines := m.createLines(w)
+	if lines == nil {
+		return ""
+	}
 	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m model) renderConfirm(w, bodyH int) string {
+// confirmLines builds the confirm-box content; the clickable y/n hint is
+// the last line.
+func (m model) confirmLines(w int) []string {
 	c := m.confirm
 	if c == nil {
-		return ""
+		return nil
 	}
 	lines := make([]string, 0, len(c.lines)+2)
 	for _, l := range c.lines {
 		lines = append(lines, m.sty.dangerText().Render(trunc(l, w-10)))
 	}
 	lines = append(lines, "", m.sty.meta().Render(m.tr(i18n.ConfirmHint)))
+	return lines
+}
+
+func (m model) renderConfirm(w, bodyH int) string {
+	lines := m.confirmLines(w)
+	if lines == nil {
+		return ""
+	}
 	box := m.sty.dangerBox().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m model) renderMove(w, bodyH int) string {
+// moveLines builds the move/template/socket picker box content (item i at
+// line 2+i).
+func (m model) moveLines(w int) []string {
 	st := m.move
 	if st == nil {
-		return ""
+		return nil
 	}
 	lines := []string{m.sty.title().Render(trunc(st.title, w-12)), ""}
 	for i, label := range st.labels {
 		lines = append(lines, m.pickLine(trunc(label, w-12), i == st.cursor))
+	}
+	return lines
+}
+
+func (m model) renderMove(w, bodyH int) string {
+	lines := m.moveLines(w)
+	if lines == nil {
+		return ""
 	}
 	box := m.sty.box().Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	return lipgloss.Place(w, bodyH, lipgloss.Center, lipgloss.Center, box)
@@ -469,17 +582,17 @@ func (m model) renderDirPick(w, bodyH int) string {
 	title := m.sty.title().Render(m.tr(i18n.DirPickTitle)) +
 		m.sty.meta().Render(m.tr(i18n.DirPickHint))
 	if len(st.matches) == 0 {
-		return lipgloss.JoinVertical(lipgloss.Left, title, "",
-			m.sty.meta().Render(m.tr(i18n.DirPickNone)))
+		lines := []string{title, "", m.sty.meta().Render(m.tr(i18n.DirPickNone))}
+		for len(lines) < bodyH {
+			lines = append(lines, "")
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 	vis := bodyH - 2
 	if vis < 1 {
 		vis = 1
 	}
-	offset := 0
-	if st.cursor >= vis {
-		offset = st.cursor - vis + 1
-	}
+	offset := m.dirPickOffset()
 	end := offset + vis
 	if end > len(st.matches) {
 		end = len(st.matches)
@@ -487,6 +600,10 @@ func (m model) renderDirPick(w, bodyH int) string {
 	lines := []string{title, ""}
 	for i := offset; i < end; i++ {
 		lines = append(lines, m.pickLine(trunc(st.matches[i]+"/", w-4), i == st.cursor))
+	}
+	// pad to the full body height so the footer stays at the bottom
+	for len(lines) < bodyH {
+		lines = append(lines, "")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }

@@ -212,7 +212,7 @@ var table = map[ID][2]string{
 	FooterChooseConfirm: {"↑/↓ choose · enter confirm · esc cancel", "↑/↓ 选择 · enter 确认 · esc 取消"},
 	FooterTemplate:      {"↑/↓ choose · enter create · d delete · r rename · esc cancel", "↑/↓ 选择 · enter 创建 · d 删除 · r 改名 · esc 取消"},
 	FooterConfirmYN:     {"y confirm · n cancel", "y 确认 · n 取消"},
-	FooterDirPick:       {"tab/→ complete · ↑/↓ choose · enter accept · esc cancel", "tab/→ 补全 · ↑/↓ 选择 · enter 接受 · esc 取消"},
+	FooterDirPick:       {"↑/↓ choose · tab/click complete · enter accept · esc cancel", "↑/↓ 选择 · tab/点击 补全 · enter 接受 · esc 取消"},
 	FooterHelpClose:     {"any key to close", "按任意键关闭"},
 	FooterSettings:      {"↑/↓ move · enter change · esc save & close", "↑/↓ 移动 · enter 修改 · esc 保存并关闭"},
 	FilterActive:        {"filter: %q (esc clears) · %s", "过滤: %q (esc 清除) · %s"},
@@ -260,7 +260,7 @@ var table = map[ID][2]string{
 	SetMouse:        {"mouse", "鼠标"},
 	On:              {"on", "开"},
 	Off:             {"off", "关"},
-	SettingsHint:    {"enter/space/arrows change, esc saves", "enter/space/方向键 修改，esc 保存"},
+	SettingsHint:    {"enter/arrows/click change, esc saves", "enter/方向键/点击 修改，esc 保存"},
 	SettingsKeysIn:  {"keys are configurable in:", "按键可在以下文件中配置："},
 	SettingsSaved:   {"settings saved", "设置已保存"},
 

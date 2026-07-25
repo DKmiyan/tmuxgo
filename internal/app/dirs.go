@@ -105,26 +105,48 @@ func (m model) handleDirPickKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
-		dir := expandHome(m.input.Value())
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			m.setStatus(m.tr(i18n.NotADirectory, dir), true)
-			return m, nil
-		}
-		// directory accepted: on to the name step
-		m.pendingDir = dir
-		m.dirPick = nil
-		m.inputPurpose = m.pendingPurpose
-		m.input.Reset()
-		m.input.SetValue(sessionNameForDir(dir))
-		m.input.CursorEnd()
-		m.input.Prompt = m.pendingPrompt
-		m.mode = modeInput
-		return m, m.input.Focus()
+		return m.dirPickAccept()
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(k)
 	m.refreshDirCompletions()
 	return m, cmd
+}
+
+// dirPickAccept validates the typed directory and advances to the name
+// step (Enter, or a double-click on a completion).
+func (m model) dirPickAccept() (tea.Model, tea.Cmd) {
+	dir := expandHome(m.input.Value())
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		m.setStatus(m.tr(i18n.NotADirectory, dir), true)
+		return m, nil
+	}
+	// directory accepted: on to the name step
+	m.pendingDir = dir
+	m.dirPick = nil
+	m.inputPurpose = m.pendingPurpose
+	m.input.Reset()
+	m.input.SetValue(sessionNameForDir(dir))
+	m.input.CursorEnd()
+	m.input.Prompt = m.pendingPrompt
+	m.mode = modeInput
+	return m, m.input.Focus()
+}
+
+// dirPickOffset is the first visible completion index in the scroll
+// window; rendering and mouse hit-testing share it.
+func (m model) dirPickOffset() int {
+	st := m.dirPick
+	_, bodyH := m.renderSize()
+	vis := bodyH - 2
+	if vis < 1 {
+		vis = 1
+	}
+	offset := 0
+	if st != nil && st.cursor >= vis {
+		offset = st.cursor - vis + 1
+	}
+	return offset
 }
 
 // refreshDirCompletions recomputes the subdirectory matches for the typed
