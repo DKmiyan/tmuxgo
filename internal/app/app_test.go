@@ -1238,13 +1238,109 @@ func TestDirPickRejectsInvalidPath(t *testing.T) {
 		m, _ = press(m, "up")
 	}
 	m, _ = press(m, "enter")
-	m.input.SetValue("/nonexistent/xyz")
+	// a path that exists as a regular file is rejected
+	f := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.input.SetValue(f)
 	m, _ = press(m, "enter")
 	if m.mode != modeDirPick {
 		t.Fatalf("mode = %v, want to stay in dir step", m.mode)
 	}
 	if m.status == "" || !m.statusIsErr {
 		t.Fatalf("status = %q (err=%v)", m.status, m.statusIsErr)
+	}
+}
+
+func TestDirPickCreatesMissingDir(t *testing.T) {
+	m, fb := newTestModel(80, 24)
+	m, _ = press(m, "n")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up")
+	}
+	m, _ = press(m, "enter")
+
+	// a typed path that does not exist (parents included) is created on
+	// accept, then the flow advances to the name step as usual
+	dir := filepath.Join(t.TempDir(), "newproj", "nested")
+	m.input.SetValue(dir)
+	m, _ = press(m, "enter")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("directory not created: %v", err)
+	}
+	if m.mode != modeInput || m.input.Value() != "nested" {
+		t.Fatalf("mode = %v, name prefill = %q", m.mode, m.input.Value())
+	}
+	if m.pendingDir != dir {
+		t.Fatalf("pendingDir = %q, want %q", m.pendingDir, dir)
+	}
+
+	// the name step creates the session anchored at the new directory
+	m, cmd := press(m, "enter")
+	msg, ok := cmd().(dirSessionMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("dirSessionMsg = %#v", msg)
+	}
+	if !reflect.DeepEqual(fb.newSessions, []string{"nested"}) {
+		t.Fatalf("newSessions = %v", fb.newSessions)
+	}
+	if !reflect.DeepEqual(fb.newSessionDirs, []string{dir}) {
+		t.Fatalf("newSessionDirs = %v, want [%s]", fb.newSessionDirs, dir)
+	}
+}
+
+func TestDirPickCreateDirFails(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "n")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up")
+	}
+	m, _ = press(m, "enter")
+	// a path through a regular file cannot be created
+	f := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.input.SetValue(f + "/sub")
+	m, _ = press(m, "enter")
+	if m.mode != modeDirPick {
+		t.Fatalf("mode = %v, want to stay in dir step", m.mode)
+	}
+	if m.status == "" || !m.statusIsErr {
+		t.Fatalf("status = %q (err=%v)", m.status, m.statusIsErr)
+	}
+}
+
+func TestDirPickWillCreateHint(t *testing.T) {
+	m, _ := newTestModel(80, 24)
+	m, _ = press(m, "n")
+	for m.create.cursor != 0 {
+		m, _ = press(m, "up")
+	}
+	m, _ = press(m, "enter")
+
+	// a missing path with no completions shows the create hint
+	m.input.SetValue(filepath.Join(t.TempDir(), "brand-new"))
+	m.refreshDirCompletions()
+	if body := m.renderDirPick(80, 20); !strings.Contains(body, "enter creates it") {
+		t.Fatalf("missing-path body lacks create hint:\n%s", body)
+	}
+
+	// an existing directory with no subdirectories shows the plain
+	// no-matches note instead
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.input.SetValue(empty + "/")
+	m.refreshDirCompletions()
+	body := m.renderDirPick(80, 20)
+	if strings.Contains(body, "enter creates it") {
+		t.Fatalf("existing-dir body must not show create hint:\n%s", body)
+	}
+	if !strings.Contains(body, "no matching subdirectories") {
+		t.Fatalf("existing-dir body lacks no-matches note:\n%s", body)
 	}
 }
 

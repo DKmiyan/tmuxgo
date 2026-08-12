@@ -183,6 +183,8 @@ const (
 	DirPickTitle
 	DirPickHint
 	DirPickNone
+	DirPickWillCreate
+	CreateDirFailed
 
 	// CLI (main package)
 	Usage
@@ -337,6 +339,8 @@ var table = map[ID][2]string{
 	DirPickTitle:          {"new session — directory", "新建会话 — 选择目录"},
 	DirPickHint:           {"  (tab/→ complete, enter accept)", "  (tab/→ 补全，enter 接受)"},
 	DirPickNone:           {"  (no matching subdirectories)", "  (没有匹配的子目录)"},
+	DirPickWillCreate:     {"  (new directory — enter creates it)", "  (新目录 — 按 enter 创建)"},
+	CreateDirFailed:       {"cannot create directory %s: %v", "无法创建目录 %s: %v"},
 
 	Usage:              {usageEN, usageZH},
 	NoSessionsCLI:      {"no tmux sessions", "没有 tmux 会话"},

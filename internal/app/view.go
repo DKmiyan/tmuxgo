@@ -582,7 +582,11 @@ func (m model) renderDirPick(w, bodyH int) string {
 	title := m.sty.title().Render(m.tr(i18n.DirPickTitle)) +
 		m.sty.meta().Render(m.tr(i18n.DirPickHint))
 	if len(st.matches) == 0 {
-		lines := []string{title, "", m.sty.meta().Render(m.tr(i18n.DirPickNone))}
+		note := m.tr(i18n.DirPickNone)
+		if _, ok := m.dirWillCreate(); ok {
+			note = m.tr(i18n.DirPickWillCreate)
+		}
+		lines := []string{title, "", m.sty.meta().Render(note)}
 		for len(lines) < bodyH {
 			lines = append(lines, "")
 		}

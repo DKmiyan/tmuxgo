@@ -114,10 +114,20 @@ func (m model) handleDirPickKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // dirPickAccept validates the typed directory and advances to the name
-// step (Enter, or a double-click on a completion).
+// step (Enter, or a double-click on a completion). A path that does not
+// exist yet is created, with any missing parents.
 func (m model) dirPickAccept() (tea.Model, tea.Cmd) {
 	dir := expandHome(m.input.Value())
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	info, err := os.Stat(dir)
+	switch {
+	case err == nil && info.IsDir():
+		// existing directory: accepted as-is
+	case os.IsNotExist(err):
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			m.setStatus(m.tr(i18n.CreateDirFailed, dir, err), true)
+			return m, nil
+		}
+	default: // exists as a non-directory, or stat failed
 		m.setStatus(m.tr(i18n.NotADirectory, dir), true)
 		return m, nil
 	}
@@ -131,6 +141,19 @@ func (m model) dirPickAccept() (tea.Model, tea.Cmd) {
 	m.input.Prompt = m.pendingPrompt
 	m.mode = modeInput
 	return m, m.input.Focus()
+}
+
+// dirWillCreate reports the typed path when it does not exist yet, so the
+// dir step can show that accepting it will create the directory.
+func (m model) dirWillCreate() (string, bool) {
+	dir := expandHome(m.input.Value())
+	if dir == "" {
+		return "", false
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return dir, true
+	}
+	return "", false
 }
 
 // dirPickOffset is the first visible completion index in the scroll

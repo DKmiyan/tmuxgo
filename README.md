@@ -18,7 +18,8 @@ popup hotkey.
 - Live filter (`/`), optional pane preview (`p`), mouse support
 - Session templates: capture a session's layout and recreate it later
 - Directory-anchored sessions: new sessions start from the selected pane's
-  working directory, editable with VSCode-style subdirectory completion
+  working directory, editable with VSCode-style subdirectory completion;
+  typed paths that don't exist yet are created for you
 - Popup mode: summon the navigator inside tmux with `prefix + g`
 - Configurable keys, theme, and defaults (`~/.config/tmuxgo/config.json`)
 - One command, one static binary, no daemon, no config file required
