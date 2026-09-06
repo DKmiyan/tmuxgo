@@ -201,6 +201,8 @@ const (
 	UnknownCommand
 	UnknownTemplateCmd
 
+	BridgeUsage
+	BridgeOperationFailed
 	idCount
 )
 
@@ -342,19 +344,21 @@ var table = map[ID][2]string{
 	DirPickWillCreate:     {"  (new directory — enter creates it)", "  (新目录 — 按 enter 创建)"},
 	CreateDirFailed:       {"cannot create directory %s: %v", "无法创建目录 %s: %v"},
 
-	Usage:              {usageEN, usageZH},
-	NoSessionsCLI:      {"no tmux sessions", "没有 tmux 会话"},
-	AttachedMark:       {" (attached)", " (已连接)"},
-	ListLine:           {"%s%s - %s, active %s ago\n", "%s%s - %s, %s 前活跃\n"},
-	SetupWrote:         {"tmuxgo: wrote %s (backup: %s.tmuxgo-bak)\n", "tmuxgo: 已写入 %s（备份: %s.tmuxgo-bak）\n"},
-	SetupUpToDate:      {"tmuxgo: %s already up to date\n", "tmuxgo: %s 已是最新\n"},
-	SetupPopupHint:     {"tmuxgo: prefix + g opens the navigator popup\n", "tmuxgo: prefix + g 打开导航弹窗\n"},
-	NoTemplatesCLI:     {"no templates (use 'tmuxgo template save <name>')", "没有模板（用 'tmuxgo template save <name>' 保存）"},
-	TemplateDeletedCLI: {"tmuxgo: template %q deleted\n", "tmuxgo: 模板 %q 已删除\n"},
-	TemplateSavedCLI:   {"tmuxgo: template %q saved (%s, from session %q) to %s\n", "tmuxgo: 模板 %q 已保存（%s，来自会话 %q）到 %s\n"},
-	SessionNotFound:    {"session %q not found", "会话 %q 不存在"},
-	UnknownCommand:     {"unknown command %q", "未知命令 %q"},
-	UnknownTemplateCmd: {"unknown template command %q", "未知 template 子命令 %q"},
+	BridgeUsage:           {"usage: tmuxgo bridge [--socket default|name] [--interval-ms 1000] [--protocol-version]\n       tmuxgo bridge-attach --ticket <one-use-ticket>\n", "用法: tmuxgo bridge [--socket default|名称] [--interval-ms 1000] [--protocol-version]\n      tmuxgo bridge-attach --ticket <一次性票据>\n"},
+	BridgeOperationFailed: {"bridge operation failed (%s)", "bridge 操作失败（%s）"},
+	Usage:                 {usageEN, usageZH},
+	NoSessionsCLI:         {"no tmux sessions", "没有 tmux 会话"},
+	AttachedMark:          {" (attached)", " (已连接)"},
+	ListLine:              {"%s%s - %s, active %s ago\n", "%s%s - %s, %s 前活跃\n"},
+	SetupWrote:            {"tmuxgo: wrote %s (backup: %s.tmuxgo-bak)\n", "tmuxgo: 已写入 %s（备份: %s.tmuxgo-bak）\n"},
+	SetupUpToDate:         {"tmuxgo: %s already up to date\n", "tmuxgo: %s 已是最新\n"},
+	SetupPopupHint:        {"tmuxgo: prefix + g opens the navigator popup\n", "tmuxgo: prefix + g 打开导航弹窗\n"},
+	NoTemplatesCLI:        {"no templates (use 'tmuxgo template save <name>')", "没有模板（用 'tmuxgo template save <name>' 保存）"},
+	TemplateDeletedCLI:    {"tmuxgo: template %q deleted\n", "tmuxgo: 模板 %q 已删除\n"},
+	TemplateSavedCLI:      {"tmuxgo: template %q saved (%s, from session %q) to %s\n", "tmuxgo: 模板 %q 已保存（%s，来自会话 %q）到 %s\n"},
+	SessionNotFound:       {"session %q not found", "会话 %q 不存在"},
+	UnknownCommand:        {"unknown command %q", "未知命令 %q"},
+	UnknownTemplateCmd:    {"unknown template command %q", "未知 template 子命令 %q"},
 }
 
 const usageEN = `tmuxgo - a tmux session navigator
@@ -365,6 +369,7 @@ usage:
   tmuxgo list       print the session/window/pane tree
   tmuxgo last       go to the previously active session
   tmuxgo new [name] create a session and go to it
+  tmuxgo bridge     versioned metadata bridge (see bridge --help)
   tmuxgo setup      install tmux.conf integration (popup, mouse, clipboard)
 
 templates (session layouts: window names, splits, working dirs):
@@ -390,6 +395,7 @@ const usageZH = `tmuxgo - tmux 会话导航器
   tmuxgo list       打印会话/窗口/面板树
   tmuxgo last       切换到上一个活跃会话
   tmuxgo new [name] 新建会话并进入
+  tmuxgo bridge     版本化元数据接口（见 bridge --help）
   tmuxgo setup      安装 tmux.conf 集成（弹窗、鼠标、剪贴板）
 
 模板（会话布局: 窗口名、拆分、工作目录）:

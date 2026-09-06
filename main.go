@@ -43,8 +43,11 @@ func plural(n int, unit i18n.ID) string {
 
 func main() {
 	lang = resolveLang()
-	b := tmux.New()
 	args := os.Args[1:]
+	if len(args) > 0 && (args[0] == "bridge" || args[0] == "bridge-attach") {
+		os.Exit(cmdBridge(args))
+	}
+	b := tmux.New()
 
 	popup := false
 	rest := args[:0]
