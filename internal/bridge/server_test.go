@@ -324,3 +324,31 @@ func TestFirstSessionCreationRetryUsesItsResultGeneration(t *testing.T) {
 		t.Fatal("duplicated initial session")
 	}
 }
+
+func TestLiteralDollarNames(t *testing.T) {
+	s, _, home := fixture(t)
+	session := result(t, mutation(t, s, "session.create", map[string]any{"name": "dollar-test", "cwd": home}))
+	window := result(t, mutation(t, s, "window.create", map[string]any{"sessionId": session.SessionID, "name": "initial", "cwd": home}))
+	for _, name := range []string{`$VALUE`, `\$VALUE`, `${VALUE}`, `\${VALUE}`, `$_VALUE`, `\$9`, `\$()`, `\\$VALUE`} {
+		t.Run(name, func(t *testing.T) {
+			result(t, mutation(t, s, "session.rename", map[string]any{"sessionId": session.SessionID, "name": name}))
+			result(t, mutation(t, s, "window.rename", map[string]any{"sessionId": session.SessionID, "windowId": window.WindowID, "name": name}))
+			snapshot, _, err := s.observe(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Name != name {
+				t.Fatalf("session name did not round trip: %+v want %q", snapshot.Sessions, name)
+			}
+			found := false
+			for _, w := range snapshot.Sessions[0].Windows {
+				if w.ID == window.WindowID {
+					found = w.Name == name
+				}
+			}
+			if !found {
+				t.Fatalf("window name did not round trip: %+v want %q", snapshot.Sessions[0].Windows, name)
+			}
+		})
+	}
+}

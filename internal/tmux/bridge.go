@@ -43,6 +43,7 @@ type BridgeClient struct {
 
 var bridgeSocket = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 var nativePID = regexp.MustCompile(`^[0-9]+$`)
+var legacyNameDollar = regexp.MustCompile(`\\(\$[A-Za-z_{])`)
 var ErrBridgeGeneration = errors.New("bridge-server-generation-changed")
 var ErrBridgeMetadata = errors.New("bridge-metadata-unavailable")
 var _ BridgeBackend = (*Tmux)(nil)
@@ -148,15 +149,22 @@ func (t *Tmux) BridgeTree(ctx context.Context) ([]Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	version, err := t.bridgeOutput(ctx, "display-message", "-p", "#{version}")
+	if err != nil {
+		return nil, err
+	}
+	var major, minor int
+	_, _ = fmt.Sscanf(strings.TrimSpace(version), "%d.%d", &major, &minor)
+	legacyDollar := major == 3 && minor == 4
 	// tmux sanitizes stored session/window names using vis escapes. Decode
 	// these names only: pane_current_path is already the literal OS path.
 	for si := range tree {
-		if tree[si].Name, err = bridgeText(tree[si].Name); err != nil {
+		if tree[si].Name, err = bridgeText(tree[si].Name, legacyDollar); err != nil {
 			return nil, err
 		}
 		for wi := range tree[si].Windows {
 			window := &tree[si].Windows[wi]
-			if window.Name, err = bridgeText(window.Name); err != nil {
+			if window.Name, err = bridgeText(window.Name, legacyDollar); err != nil {
 				return nil, err
 			}
 
@@ -164,10 +172,16 @@ func (t *Tmux) BridgeTree(ctx context.Context) ([]Session, error) {
 	}
 	return tree, nil
 }
-func bridgeText(value string) (string, error) {
+func bridgeText(value string, legacyDollar bool) (string, error) {
 	decoded, err := strconv.Unquote("\"" + strings.ReplaceAll(value, "\"", "\\\"") + "\"")
 	if err != nil {
 		return "", ErrBridgeMetadata
+	}
+	// tmux 3.4 also escapes variable-looking dollars when storing names.
+	// Undo that extra layer after vis decoding. From 3.5 onward it is only
+	// applied with VIS_DQ, so a literal backslash must be retained there.
+	if legacyDollar {
+		decoded = legacyNameDollar.ReplaceAllString(decoded, "$1")
 	}
 	return decoded, nil
 }

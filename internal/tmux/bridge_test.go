@@ -19,6 +19,7 @@ func TestBridgeGuardRejectsRestartBetweenProbeAndMutation(t *testing.T) {
 		t.Skip("tmux unavailable")
 	}
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", "/bin/sh")
 	b := newTestBackend(t)
 	id, err := b.NewSessionID("original", "")
 	if err != nil {
